@@ -301,12 +301,28 @@ func (c *container) fileNames() []string {
 // open accepts (case-sensitive).
 var sigFileRE = regexp.MustCompile(`^META-INF/[^/]*signatures[^/]*\.xml$`)
 
+// maxEntryUncompressed bounds the uncompressed size of a single ZIP
+// entry on the untrusted read path. A hostile .asice can carry a small
+// high-compression entry that decompresses to gigabytes (a zip bomb);
+// verification must reject it fast, not OOM, before any structural or
+// cryptographic check runs. A var (not a const) so tests can shrink it.
+var maxEntryUncompressed = int64(64 << 20) // 64 MiB per entry
+
+// maxTotalUncompressed bounds the aggregate uncompressed size of all
+// container entries on the untrusted read path (see
+// maxEntryUncompressed). A var (not a const) so tests can shrink it.
+var maxTotalUncompressed = int64(256 << 20) // 256 MiB total
+
 // openContainer validates the container structure the way the
 // Estonian e-voting collector's container open does (PLAN.md §1.1; the
 // error strings mirror the collector's rejection taxonomy):
 // stored "mimetype" magic entry with the exact ASiC-E content type,
 // META-INF/manifest.xml, flat data files, signature files matching
-// sigFileRE, and a manifest covering every data file.
+// sigFileRE, and a manifest covering every data file. Entry and total
+// uncompressed sizes are bounded by the zip-bomb limits below, so a
+// hostile container is rejected fast instead of exhausting memory.
+// Duplicate META-INF entry names are rejected the same way as the
+// other duplicate names.
 func openContainer(raw []byte) (*container, []string) {
 	var errs []string
 	add := func(format string, args ...any) {
@@ -339,7 +355,7 @@ func openContainer(raw []byte) (*container, []string) {
 	if off, err := first.DataOffset(); err != nil || off != int64(30+len(MimeTypeFile)) {
 		return nil, []string{"mimetype entry is not the local header at byte 0 with no extra field"}
 	}
-	mdata, err := readZipEntry(first)
+	mdata, err := readZipEntry(first, MimeTypeFile)
 	if err != nil {
 		return nil, []string{fmt.Sprintf("read mimetype entry: %v", err)}
 	}
@@ -353,9 +369,16 @@ func openContainer(raw []byte) (*container, []string) {
 		manifest: make(map[string]string),
 	}
 	var manifestDoc []byte
+	manifestSeen := false
+	totalUncompressed := int64(len(mdata))
 	for _, ef := range entries[1:] {
 		name := ef.Name
-		data, err := readZipEntry(ef)
+		data, err := readZipEntry(ef, name)
+		totalUncompressed += int64(len(data))
+		if totalUncompressed > maxTotalUncompressed {
+			add("container exceeds the uncompressed size limit")
+			break
+		}
 		switch {
 		case name == MimeTypeFile:
 			add("duplicate entry name %q", name)
@@ -364,9 +387,18 @@ func openContainer(raw []byte) (*container, []string) {
 				add("read %s: %v", name, err)
 				break
 			}
+			if manifestSeen {
+				add("duplicate entry name %q", name)
+				break
+			}
+			manifestSeen = true
 			manifestDoc = data
 		case sigFileRE.MatchString(name):
 			if err == nil {
+				if _, ok := ctr.sigDocs[name]; ok {
+					add("duplicate entry name %q", name)
+					break
+				}
 				ctr.sigDocs[name] = data
 			} else {
 				add("read %s: %v", name, err)
@@ -405,14 +437,24 @@ func openContainer(raw []byte) (*container, []string) {
 	return ctr, nil
 }
 
-// readZipEntry returns the full content of a stored or deflated entry.
-func readZipEntry(ef *zip.File) ([]byte, error) {
+// readZipEntry returns the full content of a stored or deflated
+// entry, bounded to maxEntryUncompressed bytes of uncompressed data:
+// an entry that decompresses beyond the limit is an error (see
+// maxEntryUncompressed), not an OOM.
+func readZipEntry(ef *zip.File, name string) ([]byte, error) {
 	rc, err := ef.Open()
 	if err != nil {
 		return nil, err
 	}
 	defer rc.Close()
-	return io.ReadAll(rc)
+	data, err := io.ReadAll(io.LimitReader(rc, maxEntryUncompressed+1))
+	if int64(len(data)) == maxEntryUncompressed+1 {
+		return nil, fmt.Errorf("asic: entry %q exceeds the %d byte uncompressed limit", name, maxEntryUncompressed)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return data, nil
 }
 
 const nsODFManifest = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"

@@ -4,6 +4,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"crypto/x509"
 	"encoding/pem"
 	"os"
@@ -205,7 +206,7 @@ func TestRunCreateValidation(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			err := runCreateCmd(newSink(), tc.in)
+			err := runCreateCmd(context.Background(), newSink(), tc.in)
 			if err == nil {
 				t.Fatalf("runCreateCmd succeeded, want error")
 			}

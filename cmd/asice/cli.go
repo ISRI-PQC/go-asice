@@ -126,7 +126,7 @@ Flags may be placed before or after the document paths.`,
 			}
 			in.signingTime = st
 			in.docs = args
-			err := runCreateCmd(cmd.ErrOrStderr(), in)
+			err := runCreateCmd(cmd.Context(), cmd.ErrOrStderr(), in)
 			if isUsageError(err) {
 				return err
 			}

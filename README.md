@@ -6,11 +6,20 @@ profiles.
 
 ## Security Notice
 
-This library has not been audited for security vulnerabilities. It
-creates and verifies cryptographic containers: before relying on it in
-production, review the code, validate its behavior against your threat
-model, and test with your own certificates, TSA endpoints, and
-containers.
+This codebase was scanned on 2026-09-01 with
+[deepsec](https://github.com/vercel-labs/deepsec) (an AI-assisted
+security scanner) against a project threat model covering hostile
+`.asice` containers, operator-supplied key/PEM inputs, and an
+attacker-influenced TSA endpoint. Every exported finding was triaged
+and resolved: the confirmed defects were fixed with regression tests,
+and the one remaining finding was verified as a false positive and
+pinned by a regression test so the behavior is preserved.
+
+That scan is a point-in-time audit, not a security certification. This
+library creates and verifies cryptographic containers: before relying
+on it in production, review the code, validate its behavior against
+your threat model, and test with your own certificates, TSA endpoints,
+and containers.
 
 ## Verification
 

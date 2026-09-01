@@ -245,6 +245,7 @@ func checkSignatureValue(m *verifyModules, sv, si *etree.Element, cert *x509.Cer
 	sigVal, err := decodeBase64(sv.Text())
 	if err != nil {
 		fail("%s: decode SignatureValue base64: %v", name, err)
+		return
 	}
 	if err := m.verifier.VerifySignedInfo(canon, cert.Raw, sigVal, spec.XMLSignatureAlgorithmID(sigAlg)); err != nil {
 		fail("%s: signature verification failed: %v", name, err)

@@ -17,6 +17,7 @@ import (
 	"fmt"
 	"hash/crc32"
 	"io"
+	"math"
 )
 
 // Container constants fixed by the ASiC-E / BDOC interop contract (see
@@ -82,6 +83,30 @@ func writeContainerZIP(w io.Writer, manifest []byte, docs []Doc, sigs [][]byte) 
 	}
 	for i, s := range sigs {
 		entries = append(entries, zipEntry{name: SignatureFilePrefix + fmt.Sprint(i) + ".xml", data: s})
+	}
+
+	// Classic (non-ZIP64) ZIP fields are fixed-width: an unchecked
+	// narrowing conversion past the limit would wrap silently and emit a
+	// container whose metadata disagrees with its bytes, so validate
+	// before writing anything (see checkZIPBounds).
+	total := 22 // EOCD
+	maxName, maxData := 0, 0
+	for i := range entries {
+		e := &entries[i]
+		total += 76 + 2*len(e.name) + len(e.data) // 30-byte local + 46-byte central header, name twice, data once
+		if total > math.MaxUint32 {
+			total = math.MaxUint32 + 1 // cap; any larger total is rejected the same
+			break
+		}
+		if len(e.name) > maxName {
+			maxName = len(e.name)
+		}
+		if len(e.data) > maxData {
+			maxData = len(e.data)
+		}
+	}
+	if err := checkZIPBounds(maxName, maxData, len(entries), total); err != nil {
+		return err
 	}
 
 	var b []byte // assembled locally so offsets are known before writing
@@ -154,6 +179,33 @@ func checkDocName(name string) error {
 	}
 	if name == MimeTypeFile || name == "META-INF" {
 		return fmt.Errorf("asic: document name %q is reserved", name)
+	}
+	return nil
+}
+
+// checkZIPBounds reports an error if any container content would overflow
+// a fixed-width field of the classic (non-ZIP64) ZIP format that
+// writeContainerZIP emits: an entry name of more than math.MaxUint16
+// bytes (uint16 name fields in the local and central directory headers),
+// entry data of more than math.MaxUint32 bytes (uint32 size fields), more
+// than math.MaxUint16 entries (uint16 entry-count fields in the EOCD), or
+// a total archive size above math.MaxUint32 bytes (uint32 offset/size
+// fields in the central directory and EOCD). Exact fits are allowed; only
+// values past the maxima are rejected. The ASiC-E interop target reads
+// classic ZIP, so the writer rejects oversized input instead of
+// upgrading to ZIP64.
+func checkZIPBounds(nameLen, dataLen, entryCount, totalBytes int) error {
+	if nameLen > math.MaxUint16 {
+		return fmt.Errorf("asic: entry name of %d bytes exceeds the %d-byte ZIP name field limit", nameLen, math.MaxUint16)
+	}
+	if dataLen > math.MaxUint32 {
+		return fmt.Errorf("asic: entry data of %d bytes exceeds the %d-byte ZIP size field limit", dataLen, math.MaxUint32)
+	}
+	if entryCount > math.MaxUint16 {
+		return fmt.Errorf("asic: %d entries exceeds the %d-entry ZIP central directory limit", entryCount, math.MaxUint16)
+	}
+	if totalBytes > math.MaxUint32 {
+		return fmt.Errorf("asic: archive of %d bytes exceeds the %d-byte ZIP offset/size limit", totalBytes, math.MaxUint32)
 	}
 	return nil
 }

@@ -25,6 +25,19 @@ const maxResponseSize = 10240
 // hashes the queried data with SHA-256, as the collector's TSP client does.
 var OidSHA256 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
 
+// DefaultTimeout bounds a single TSA exchange (one request and
+// response attempt, including the dial). It exists so a stalled or
+// hostile TSA that accepts the TCP connection but never responds
+// cannot hang the client indefinitely; such a TSA fails the exchange
+// as a timeout and is then retried like any other transport error.
+const DefaultTimeout = 30 * time.Second
+
+// defaultHTTPClient is the package default HTTP client used when
+// Client.HTTPClient is nil; it applies DefaultTimeout so a stalled TSA
+// fails instead of hanging. It is a variable so tests can substitute
+// a short-timeout client.
+var defaultHTTPClient = &http.Client{Timeout: DefaultTimeout}
+
 // Client requests time-stamps from a configured TSA (RFC 3161).
 type Client struct {
 	// URL is the TSA endpoint (POST, application/timestamp-query).
@@ -56,7 +69,7 @@ type Client struct {
 	// or transport error (mirroring the collector's retry setting).
 	Retry uint
 	// HTTPClient is the HTTP client used for requests (default
-	// http.DefaultClient).
+	// defaultHTTPClient, bounded by DefaultTimeout).
 	HTTPClient *http.Client
 }
 
@@ -208,7 +221,7 @@ func (v *Validator) checkTokenBody(token, data []byte, nonce *big.Int, now time.
 func (c *Client) submit(ctx context.Context, reqDER []byte) ([]byte, error) {
 	hc := c.HTTPClient
 	if hc == nil {
-		hc = http.DefaultClient
+		hc = defaultHTTPClient
 	}
 	for attempt := uint(0); ; attempt++ {
 		body, err := c.do(ctx, hc, reqDER)

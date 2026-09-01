@@ -5,6 +5,7 @@
 package asic
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/x509"
 	"encoding/pem"
@@ -135,9 +136,10 @@ func Create(w io.Writer, opts CreateOptions) error {
 // default implementation, ADR 0004).
 func ParseSigner(b []byte) (Signer, error) {
 	var (
-		cert   *x509.Certificate
-		key    crypto.Signer
-		keyErr error
+		cert      *x509.Certificate
+		key       crypto.Signer
+		keyBlocks int
+		keyErr    error
 	)
 	rest := b
 	for {
@@ -157,7 +159,12 @@ func ParseSigner(b []byte) (Signer, error) {
 			}
 			cert = c
 		default:
-			if key != nil {
+			// Count every private-key-typed block, including ones that
+			// fail to decode: the contract is exactly one key block, so
+			// a corrupt first block followed by a valid second is still
+			// a two-key file.
+			keyBlocks++
+			if keyBlocks > 1 {
 				return Signer{}, errors.New("asic: signer file has more than one private key block")
 			}
 			k, err := parsePrivateKeyBlock(block)
@@ -176,6 +183,9 @@ func ParseSigner(b []byte) (Signer, error) {
 			return Signer{}, fmt.Errorf("asic: signer file private key: %w", keyErr)
 		}
 		return Signer{}, errors.New("asic: signer file has no PEM private key block")
+	}
+	if !signerKeyMatchesCert(key, cert) {
+		return Signer{}, errors.New("asic: signer private key does not match the certificate")
 	}
 	// The standard signer module is the default implementation
 	// (ADR 0004); an alternative backend wraps its own signer module
@@ -235,6 +245,23 @@ func parsePrivateKeyBlock(block *pem.Block) (crypto.Signer, error) {
 		return nil, fmt.Errorf("asic: %s key is not a crypto.Signer (%T)", block.Type, raw)
 	}
 	return key, nil
+}
+
+// signerKeyMatchesCert reports whether the parsed private key's public
+// key equals the certificate's public key. It compares the PKIX
+// encodings, which covers every key type parsePrivateKeyBlock can
+// return (*rsa.PrivateKey, *ecdsa.PrivateKey, and
+// *ed25519.PrivateKey via PKCS#8) without per-type comparisons.
+func signerKeyMatchesCert(key crypto.Signer, cert *x509.Certificate) bool {
+	kder, err := x509.MarshalPKIXPublicKey(key.Public())
+	if err != nil {
+		return false
+	}
+	cder, err := x509.MarshalPKIXPublicKey(cert.PublicKey)
+	if err != nil {
+		return false
+	}
+	return bytes.Equal(kder, cder)
 }
 
 // MediaTypeForName guesses the ODF manifest media type from the file

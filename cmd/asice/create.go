@@ -32,8 +32,11 @@ type createInput struct {
 
 // runCreateCmd executes the create flow and reports progress to
 // stderr. It returns a plain error on any failure (the CLI maps it to
-// exit 1, the create/verify failure code).
-func runCreateCmd(stderr io.Writer, in createInput) error {
+// exit 1, the create/verify failure code). ctx bounds the create
+// operation (the CLI passes the cobra command context); the TSA
+// timestamp requests are additionally bounded by the tsa.Client
+// package default timeout (tsa.DefaultTimeout).
+func runCreateCmd(ctx context.Context, stderr io.Writer, in createInput) error {
 	in.profile = strings.ToLower(strings.TrimSpace(in.profile))
 	if in.out == "" {
 		return errors.New("-o is required (output container path)")
@@ -126,7 +129,6 @@ func runCreateCmd(stderr io.Writer, in createInput) error {
 		// ADR 0004).
 		client.DigestModule = tsacrypto.NewStdDigestModule()
 		client.SignatureVerifierModule = tsacrypto.NewStdSignatureVerifierModule()
-		ctx := context.Background()
 		opts.OCSPResponse = ocsp
 		opts.TSCertificates = chain
 		opts.TimeStamp = func(data []byte) ([]byte, error) {
