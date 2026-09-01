@@ -12,7 +12,7 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/xmlsig/spec"
+	"github.com/isri-pqc/go-xmlsig/spec"
 
 	"github.com/isri-pqc/asice/testutil"
 	"github.com/isri-pqc/asice/xades"

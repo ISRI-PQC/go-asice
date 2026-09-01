@@ -9,9 +9,9 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/xmlsig/canonicalizers"
-	"github.com/isri-pqc/xmlsig/etreeutils"
-	"github.com/isri-pqc/xmlsig/spec"
+	"github.com/isri-pqc/go-xmlsig/canonicalizers"
+	"github.com/isri-pqc/go-xmlsig/etreeutils"
+	"github.com/isri-pqc/go-xmlsig/spec"
 )
 
 // TestGoldenSignedPropertiesDigest cross-checks our C14N 1.1 output for

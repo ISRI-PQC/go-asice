@@ -12,7 +12,7 @@ import (
 
 	"github.com/isri-pqc/asice/asic"
 	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // verifyInput is the parsed verify request (testable without a

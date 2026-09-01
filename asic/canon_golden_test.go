@@ -6,9 +6,9 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/xmlsig/canonicalizers"
-	"github.com/isri-pqc/xmlsig/etreeutils"
-	"github.com/isri-pqc/xmlsig/spec"
+	"github.com/isri-pqc/go-xmlsig/canonicalizers"
+	"github.com/isri-pqc/go-xmlsig/etreeutils"
+	"github.com/isri-pqc/go-xmlsig/spec"
 )
 
 // TestGoldenSignedInfoCanonicalization verifies that xmlsig's C14N 1.1

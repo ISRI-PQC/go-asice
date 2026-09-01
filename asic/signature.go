@@ -27,11 +27,11 @@ import (
 
 	"github.com/beevik/etree"
 	"github.com/isri-pqc/asice/xades"
-	"github.com/isri-pqc/xmlsig"
-	"github.com/isri-pqc/xmlsig/canonicalizers"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
-	"github.com/isri-pqc/xmlsig/etreeutils"
-	"github.com/isri-pqc/xmlsig/spec"
+	"github.com/isri-pqc/go-xmlsig"
+	"github.com/isri-pqc/go-xmlsig/canonicalizers"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
+	"github.com/isri-pqc/go-xmlsig/etreeutils"
+	"github.com/isri-pqc/go-xmlsig/spec"
 )
 
 // Algorithm URIs used by SignedInfo itself (the Estonian e-voting

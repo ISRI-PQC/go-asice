@@ -34,7 +34,7 @@ the injected modules.
   (`cmd/asice`) constructs and injects. Swapping to an alternative
   backend (HSM, soft-token) means implementing the same interfaces
   and injecting them — domain code is untouched.
-- The `xmlsig` engine (the public module `github.com/isri-pqc/xmlsig`;
+- The `xmlsig` engine (the public module `github.com/isri-pqc/go-xmlsig`;
   ADR 0001's engine) was already built this way and is the reference
   implementation; it is NOT modified.
 

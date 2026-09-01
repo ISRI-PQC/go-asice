@@ -4,7 +4,7 @@
 package xades
 
 import (
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // stdDM returns the standard XML digest module.

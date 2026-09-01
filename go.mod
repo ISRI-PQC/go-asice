@@ -5,7 +5,7 @@ go 1.25
 require (
 	github.com/beevik/etree v1.6.0
 	github.com/charmbracelet/fang v1.0.0
-	github.com/isri-pqc/xmlsig v0.4.0
+	github.com/isri-pqc/go-xmlsig v0.6.0
 	github.com/spf13/cobra v1.10.2
 )
 
@@ -37,4 +37,4 @@ require (
 	golang.org/x/text v0.24.0 // indirect
 )
 
-// replace github.com/isri-pqc/xmlsig => ../agile-xml-signatures
+// replace github.com/isri-pqc/go-xmlsig => ../agile-xml-signatures

@@ -18,7 +18,7 @@ import (
 	"time"
 
 	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // Signer pairs a signer certificate with its XML-DSig signer module.

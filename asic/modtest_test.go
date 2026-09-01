@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // stdSignerModule wraps a private key in the standard ASiC-E signer

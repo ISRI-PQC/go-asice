@@ -22,7 +22,7 @@ import (
 	"crypto/x509"
 
 	"github.com/isri-pqc/asice/testutil"
-	"github.com/isri-pqc/xmlsig/spec"
+	"github.com/isri-pqc/go-xmlsig/spec"
 )
 
 // createT is the single reference time of the Create unit matrix.

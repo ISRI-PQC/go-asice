@@ -49,7 +49,7 @@ and containers.
 | `xades/spec`    | XAdES spec pointers (TS 101 903, TS 103 171)                           | normative reference for XAdES                     |
 | `bdoc/spec`     | BDOC spec pointer (2.1.2:2014)                                         | normative reference for the container format      |
 
-The XML-DSig engine is the public module `github.com/isri-pqc/xmlsig`
+The XML-DSig engine is the public module `github.com/isri-pqc/go-xmlsig`
 (dependency in `go.mod`); this repo has no `xmlsig/` submodule.
 
 ## Build & test
@@ -181,7 +181,7 @@ acceptance harness maintained outside this repo.
 
 | Module                                                        | License         | Role                                                       |
 | ------------------------------------------------------------- | --------------- | ---------------------------------------------------------- |
-| [github.com/isri-pqc/xmlsig](https://github.com/isri-pqc/xmlsig) | Apache-2.0 | the XML-DSig engine: C14N 1.1 canonicalization, digest/signature primitives, signature builder |
+| [github.com/isri-pqc/go-xmlsig](https://github.com/isri-pqc/go-xmlsig) | Apache-2.0 | the XML-DSig engine: C14N 1.1 canonicalization, digest/signature primitives, signature builder |
 | [github.com/beevik/etree](https://github.com/beevik/etree)     | BSD-2-Clause    | XML document tree handling                                 |
 | [github.com/spf13/cobra](https://github.com/spf13/cobra)       | Apache-2.0      | CLI command framework                                      |
 | [github.com/charmbracelet/fang](https://github.com/charmbracelet/fang) | MIT       | CLI UX (completions, manpage generation)                   |

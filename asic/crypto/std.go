@@ -10,7 +10,7 @@ import (
 
 	"github.com/isri-pqc/asice/tsa"
 	tsacrypto "github.com/isri-pqc/asice/tsa/crypto"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // === Standard XMLSignatureSignerModule / XMLSignatureVerifierModule ===

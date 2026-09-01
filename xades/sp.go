@@ -9,8 +9,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
-	"github.com/isri-pqc/xmlsig/spec"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
+	"github.com/isri-pqc/go-xmlsig/spec"
 )
 
 // File is one signed data file: the flat name (ds:Reference URI inside

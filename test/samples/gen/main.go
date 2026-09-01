@@ -29,10 +29,10 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/xmlsig/canonicalizers"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
-	"github.com/isri-pqc/xmlsig/etreeutils"
-	"github.com/isri-pqc/xmlsig/spec"
+	"github.com/isri-pqc/go-xmlsig/canonicalizers"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
+	"github.com/isri-pqc/go-xmlsig/etreeutils"
+	"github.com/isri-pqc/go-xmlsig/spec"
 
 	"github.com/isri-pqc/asice/asic"
 	asiccrypto "github.com/isri-pqc/asice/asic/crypto"

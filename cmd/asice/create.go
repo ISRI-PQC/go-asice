@@ -13,7 +13,7 @@ import (
 	"github.com/isri-pqc/asice/asic"
 	"github.com/isri-pqc/asice/tsa"
 	tsacrypto "github.com/isri-pqc/asice/tsa/crypto"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // createInput is the parsed create request (testable without a

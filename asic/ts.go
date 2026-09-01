@@ -20,7 +20,7 @@ import (
 	"time"
 
 	"github.com/isri-pqc/asice/xades"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // TSData carries the TS-profile artifacts SignTS embeds. asic never

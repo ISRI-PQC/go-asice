@@ -31,7 +31,7 @@ import (
 
 	"github.com/beevik/etree"
 	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
-	xcrypto "github.com/isri-pqc/xmlsig/crypto"
+	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
 // Profile selects the ASiC-E verification profile.
