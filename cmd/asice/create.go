@@ -21,6 +21,7 @@ import (
 type createInput struct {
 	out         string
 	certFile    string
+	keyFile     string
 	profile     string
 	chainFile   string
 	ocspFile    string
@@ -42,7 +43,7 @@ func runCreateCmd(ctx context.Context, stderr io.Writer, in createInput) error {
 		return errors.New("-o is required (output container path)")
 	}
 	if in.certFile == "" {
-		return errors.New("--cert is required (signer certificate + private key file)")
+		return errors.New("--cert is required (signer certificate file)")
 	}
 	if len(in.docs) == 0 {
 		return errors.New("at least one document path is required")
@@ -76,9 +77,24 @@ func runCreateCmd(ctx context.Context, stderr io.Writer, in createInput) error {
 	if err != nil {
 		return fmt.Errorf("read --cert: %w", err)
 	}
-	signer, err := asic.ParseSigner(certRaw)
-	if err != nil {
-		return fmt.Errorf("parse --cert: %w", err)
+	// With --key, the key comes from a separate file and --cert is
+	// treated as the certificate file. Without it, --cert is the
+	// combined signer file (certificate + private key block).
+	var signer asic.Signer
+	if in.keyFile != "" {
+		keyRaw, err := os.ReadFile(in.keyFile)
+		if err != nil {
+			return fmt.Errorf("read --key: %w", err)
+		}
+		signer, err = asic.ParseSignerCertKey(certRaw, keyRaw)
+		if err != nil {
+			return fmt.Errorf("parse signer (--cert/--key): %w", err)
+		}
+	} else {
+		signer, err = asic.ParseSigner(certRaw)
+		if err != nil {
+			return fmt.Errorf("parse --cert: %w", err)
+		}
 	}
 	docs, err := asic.DocsFromPaths(in.docs)
 	if err != nil {

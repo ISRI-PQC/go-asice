@@ -197,6 +197,55 @@ func ParseSigner(b []byte) (Signer, error) {
 	return Signer{Certificate: cert, SignerModule: sm}, nil
 }
 
+// ParseSignerCertKey builds a Signer from a signer certificate file
+// (PEM with one CERTIFICATE block) and its private key (PEM or DER:
+// PKCS#8 "PRIVATE KEY", PKCS#1 "RSA PRIVATE KEY", or SEC1 "EC PRIVATE
+// KEY"). Non-CERTIFICATE blocks in the certificate input are ignored,
+// so a legacy combined file still works as the certificate side. The
+// returned Signer carries the standard signer module over the parsed
+// key (the default implementation, ADR 0004).
+func ParseSignerCertKey(certPEM, keyPEM []byte) (Signer, error) {
+	var (
+		cert      *x509.Certificate
+		certCount int
+	)
+	rest := certPEM
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		certCount++
+		if certCount > 1 {
+			return Signer{}, errors.New("asic: certificate file has more than one CERTIFICATE block")
+		}
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return Signer{}, fmt.Errorf("asic: parse signer certificate: %w", err)
+		}
+		cert = c
+	}
+	if cert == nil {
+		return Signer{}, errors.New("asic: certificate file has no PEM CERTIFICATE block")
+	}
+	key, err := ParsePrivateKey(keyPEM)
+	if err != nil {
+		return Signer{}, fmt.Errorf("asic: signer private key: %w", err)
+	}
+	if !signerKeyMatchesCert(key, cert) {
+		return Signer{}, errors.New("asic: signer private key does not match the certificate")
+	}
+	sm, err := asiccrypto.NewStdSignerModule(key, crypto.SHA256)
+	if err != nil {
+		return Signer{}, fmt.Errorf("asic: signer private key: %w", err)
+	}
+	return Signer{Certificate: cert, SignerModule: sm}, nil
+}
+
 // ParsePrivateKey decodes a private key from PEM (PKCS#8
 // "PRIVATE KEY", PKCS#1 "RSA PRIVATE KEY", or SEC1 "EC PRIVATE KEY"
 // block) or from a single DER encoding of one of those three.

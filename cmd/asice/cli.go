@@ -114,6 +114,10 @@ for example:
 
   asice create -o out.asice --cert signer.pem report.pdf appendix.pdf
 
+--cert holds the signer CERTIFICATE block. It may also hold the
+private key block, or you can pass the key in a separate file with
+--key (in which case --cert is read as the certificate file only).
+
 Flags may be placed before or after the document paths.`,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			st := time.Now().UTC()
@@ -137,7 +141,8 @@ Flags may be placed before or after the document paths.`,
 		},
 	}
 	cmd.Flags().StringVarP(&in.out, "o", "o", "", "output container path (required)")
-	cmd.Flags().StringVar(&in.certFile, "cert", "", "signer file: PEM with one CERTIFICATE block and one private key block (required)")
+	cmd.Flags().StringVar(&in.certFile, "cert", "", "signer file: PEM with the signer CERTIFICATE block, and optionally the private key block (required)")
+	cmd.Flags().StringVar(&in.keyFile, "key", "", "signer private key file: PEM (or DER) private key block; if omitted, the key must be a block in --cert")
 	cmd.Flags().StringVar(&in.profile, "profile", "bes", "signature profile: bes or ts")
 	cmd.Flags().StringVar(&in.chainFile, "chain", "", "ts profile: PEM with exactly two certificates (OCSP responder, then CA)")
 	cmd.Flags().StringVar(&in.ocspFile, "ocsp-file", "", "ts profile: DER basic OCSP response for the signer")

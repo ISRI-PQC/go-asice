@@ -65,7 +65,7 @@ go test ./... -count=1
 ## CLI
 
 ```
-asice create -o out.asice --cert signer.pem [--chain chain.pem]
+asice create -o out.asice --cert signer.pem --key signer.key [--chain chain.pem]
     [--profile bes|ts] [--ocsp-file ocsp.der] [--tst <tsa-url>]
     [--tst-signers tsa.pem] [--signing-time <RFC3339>] doc1 [doc2 ...]
 
@@ -82,9 +82,12 @@ and a hidden `man` command (manpage generation).
 ### create
 
 - `-o` — output container path (required).
-- `--cert` — signer file: PEM with one `CERTIFICATE` block (the signer
-  certificate) and one private key block (`PRIVATE KEY` / `RSA PRIVATE
-KEY` / `EC PRIVATE KEY`) (required).
+- `--cert` — signer file: PEM with the signer `CERTIFICATE` block. It
+  may also hold the private key block (`PRIVATE KEY` / `RSA PRIVATE KEY`
+  / `EC PRIVATE KEY`) (required).
+- `--key` — signer private key file: PEM (or DER) private key block. If
+  omitted, the key must be a block inside `--cert`; if given, `--cert`
+  is read as the certificate file only.
 - `--profile` — `bes` (default) or `ts`.
 - `--chain` — **ts profile**: PEM with exactly two certificates, the
   OCSP responder first and the CA second (embedded in
@@ -121,7 +124,7 @@ signer and signing time, and actionable errors).
 BES (minimal):
 
 ```
-asice create -o out.asice --cert signer.pem --profile bes contract.pdf
+asice create -o out.asice --cert signer.pem --key signer.key --profile bes contract.pdf
 asice verify out.asice --roots root.pem --intermediates issuer.pem --profile bes
 ```
 
@@ -129,7 +132,7 @@ TS (against a live TSA; one consistent time — here the OCSP response's
 producedAt — for `--signing-time`):
 
 ```
-asice create -o out.asice --cert signer.pem --profile ts \
+asice create -o out.asice --cert signer.pem --key signer.key --profile ts \
     --chain ocsp-responder-then-ca.pem --ocsp-file ocsp.der \
     --tst https://tsa.example/tsp --tst-signers tsa.pem \
     --signing-time 2026-08-28T10:00:00Z contract.pdf

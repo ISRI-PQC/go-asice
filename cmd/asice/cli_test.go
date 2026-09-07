@@ -104,16 +104,25 @@ func writePEM(t *testing.T, dir, name string, blocks ...[]byte) string {
 	return path
 }
 
-// signerFilePEM renders the --cert file for the signer cert: the
-// certificate PEM block plus the private key as a PKCS#8 PEM block.
+// signerFilePEM renders the combined --cert file (no --key): the
+// certificate PEM block followed by the private key as a PKCS#8 PEM
+// block.
 func signerFilePEM(t *testing.T, c *testutil.Cert) []byte {
+	t.Helper()
+	key := signerKeyPEM(t, c)
+	return append(append([]byte{}, c.PEM...), key...)
+}
+
+// signerKeyPEM renders the --key file for the signer: the private key
+// as a PKCS#8 PEM block (paired with a --cert file holding only the
+// certificate PEM block, p.Signer.PEM).
+func signerKeyPEM(t *testing.T, c *testutil.Cert) []byte {
 	t.Helper()
 	der, err := x509.MarshalPKCS8PrivateKey(c.PrivateKey)
 	if err != nil {
 		t.Fatal(err)
 	}
-	key := pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
-	return append(append([]byte{}, c.PEM...), key...)
+	return pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 }
 
 // newCLIContainer builds a one-file BES container through execute
@@ -188,6 +197,37 @@ func TestExecuteCreateVerify(t *testing.T) {
 	// Unknown profile: usage error.
 	if code := execute(newSink(), newSink(), []string{"verify", container, "--roots", roots, "--profile", "lt"}); code != exitUsageErr {
 		t.Errorf("verify with unknown profile: exit %d, want %d", code, exitUsageErr)
+	}
+}
+
+// TestExecuteCreateSeparateKey pins the --key path: the signer
+// certificate and its private key are supplied in separate files.
+func TestExecuteCreateSeparateKey(t *testing.T) {
+	p, err := testutil.NewPKI(testutil.Options{Now: cliT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	dir := t.TempDir()
+	docPath := filepath.Join(dir, "test.txt")
+	if err := os.WriteFile(docPath, []byte("cli unit data"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	signerCert := writePEM(t, dir, "signer.pem", p.Signer.PEM)
+	signerKey := writePEM(t, dir, "signer.key", signerKeyPEM(t, p.Signer))
+
+	containerPath := filepath.Join(dir, "out.asice")
+	if code, _, serr := runExecuteChecked(t, []string{
+		"create",
+		"-o", containerPath,
+		"--cert", signerCert,
+		"--key", signerKey,
+		"--signing-time", cliT.Format(time.RFC3339),
+		docPath,
+	}); code != exitOK {
+		t.Fatalf("create exited %d, want 0 (stderr: %s)", code, serr)
+	}
+	if _, err := os.Stat(containerPath); err != nil {
+		t.Fatalf("container not written: %v", err)
 	}
 }
 
