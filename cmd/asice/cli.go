@@ -140,7 +140,7 @@ Flags may be placed before or after the document paths.`,
 			return nil
 		},
 	}
-	cmd.Flags().StringVarP(&in.out, "o", "o", "", "output container path (required)")
+	cmd.Flags().StringVarP(&in.out, "output", "o", "", "output container path (required)")
 	cmd.Flags().StringVar(&in.certFile, "cert", "", "signer file: PEM with the signer CERTIFICATE block, and optionally the private key block (required)")
 	cmd.Flags().StringVar(&in.keyFile, "key", "", "signer private key file: PEM (or DER) private key block; if omitted, the key must be a block in --cert")
 	cmd.Flags().StringVar(&in.profile, "profile", "bes", "signature profile: bes or ts")
