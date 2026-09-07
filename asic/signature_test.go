@@ -24,8 +24,8 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/asice/testutil"
-	"github.com/isri-pqc/asice/xades"
+	"github.com/isri-pqc/go-asice/testutil"
+	"github.com/isri-pqc/go-asice/xades"
 )
 
 // TestSignBESIndex pins the S{k} identifier scheme of SignBES (Task 5):

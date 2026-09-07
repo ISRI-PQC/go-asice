@@ -26,7 +26,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/asice/xades"
+	"github.com/isri-pqc/go-asice/xades"
 	"github.com/isri-pqc/go-xmlsig"
 	"github.com/isri-pqc/go-xmlsig/canonicalizers"
 	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"

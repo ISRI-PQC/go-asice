@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 // TestUnsignedPropertiesMatchesTSFixtureShape shape-compares the rendered

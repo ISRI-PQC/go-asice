@@ -10,8 +10,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/isri-pqc/asice/asic"
-	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
+	"github.com/isri-pqc/go-asice/asic"
+	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
 	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 

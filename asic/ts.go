@@ -19,7 +19,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/isri-pqc/asice/xades"
+	"github.com/isri-pqc/go-asice/xades"
 	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 

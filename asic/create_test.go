@@ -21,7 +21,7 @@ import (
 
 	"crypto/x509"
 
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/testutil"
 	"github.com/isri-pqc/go-xmlsig/spec"
 )
 

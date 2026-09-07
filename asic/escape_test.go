@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 // TestHostileNameEscapesRoundTrips drives a file name and media type full

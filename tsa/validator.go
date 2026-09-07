@@ -10,7 +10,7 @@ import (
 	"math/big"
 	"time"
 
-	tcrypto "github.com/isri-pqc/asice/tsa/crypto"
+	tcrypto "github.com/isri-pqc/go-asice/tsa/crypto"
 )
 
 // Default freshness bounds (ADR 0001 section 5; the defaults of the

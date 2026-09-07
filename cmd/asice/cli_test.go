@@ -13,7 +13,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 var cliT = time.Date(2026, 8, 7, 10, 0, 0, 0, time.UTC)

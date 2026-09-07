@@ -14,7 +14,7 @@ import (
 	"net/http"
 	"time"
 
-	tcrypto "github.com/isri-pqc/asice/tsa/crypto"
+	tcrypto "github.com/isri-pqc/go-asice/tsa/crypto"
 )
 
 // maxResponseSize is the maximum accepted timestamp-reply body size

@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/isri-pqc/asice/testutil"
-	tcrypto "github.com/isri-pqc/asice/tsa/crypto"
+	"github.com/isri-pqc/go-asice/testutil"
+	tcrypto "github.com/isri-pqc/go-asice/tsa/crypto"
 )
 
 // testTSA is an in-process RFC 3161 test TSA. It verifies the request

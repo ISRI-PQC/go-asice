@@ -16,7 +16,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 // --- TimeStampReq codec ---

@@ -257,7 +257,7 @@ must use this path, not `crypto.SignMessage`.
 
 ## 7. What Tasks 2–5 build on (API surface)
 
-Locked, tested public surface (module `github.com/isri-pqc/asice`):
+Locked, tested public surface (module `github.com/isri-pqc/go-asice`):
 
 - `asic.Doc{Name, MediaType string; Data []byte}` — one data file.
 - `asic.WriteContainer(w io.Writer, docs []Doc, sigs ...[]byte) error` —

@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 var tsNow = time.Date(2026, 8, 27, 10, 0, 0, 0, time.UTC)

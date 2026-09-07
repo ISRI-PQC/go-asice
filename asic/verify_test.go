@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
-	"github.com/isri-pqc/asice/testutil"
+	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 // verifyT is the single reference time of these unit tests (PKI

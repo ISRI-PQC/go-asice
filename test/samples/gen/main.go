@@ -34,9 +34,9 @@ import (
 	"github.com/isri-pqc/go-xmlsig/etreeutils"
 	"github.com/isri-pqc/go-xmlsig/spec"
 
-	"github.com/isri-pqc/asice/asic"
-	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
-	"github.com/isri-pqc/asice/testutil"
+	"github.com/isri-pqc/go-asice/asic"
+	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
+	"github.com/isri-pqc/go-asice/testutil"
 )
 
 // fixedNow is the single reference time of the generated fixtures

@@ -30,7 +30,7 @@ import (
 	"time"
 
 	"github.com/beevik/etree"
-	asiccrypto "github.com/isri-pqc/asice/asic/crypto"
+	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
 	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 

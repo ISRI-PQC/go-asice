@@ -14,8 +14,8 @@ import (
 	"github.com/beevik/etree"
 	"github.com/isri-pqc/go-xmlsig/spec"
 
-	"github.com/isri-pqc/asice/testutil"
-	"github.com/isri-pqc/asice/xades"
+	"github.com/isri-pqc/go-asice/testutil"
+	"github.com/isri-pqc/go-asice/xades"
 )
 
 // recordingVerifier is a mock XMLSignatureVerifierModule (ADR 0004):

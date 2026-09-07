@@ -13,8 +13,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/isri-pqc/asice/testutil"
-	tcrypto "github.com/isri-pqc/asice/tsa/crypto"
+	"github.com/isri-pqc/go-asice/testutil"
+	tcrypto "github.com/isri-pqc/go-asice/tsa/crypto"
 )
 
 // fixedNow is the reference time for hermetic validator tests.

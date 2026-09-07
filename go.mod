@@ -1,4 +1,4 @@
-module github.com/isri-pqc/asice
+module github.com/isri-pqc/go-asice
 
 go 1.25
 
@@ -36,5 +36,3 @@ require (
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.24.0 // indirect
 )
-
-// replace github.com/isri-pqc/go-xmlsig => ../agile-xml-signatures
