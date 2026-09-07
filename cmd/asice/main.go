@@ -7,7 +7,7 @@ import (
 )
 
 // appVersion is reported by `asice --version` (fang.WithVersion).
-const appVersion = "0.2.0"
+const appVersion = "0.3.0"
 
 // Exit codes: 0 ok, 1 create/verify failure, 2 usage error.
 const (
