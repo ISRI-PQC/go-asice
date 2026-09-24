@@ -118,10 +118,19 @@ func certIDForCert(cert *Cert) (ocspCertID, error) {
 //     collector's issuer-fallback path finds and verifies the responder
 //     from there.
 func (p *PKI) OCSPResponse(producedAt time.Time) ([]byte, error) {
-	if producedAt.IsZero() {
+	return p.OCSPResponseWithTimes(producedAt, producedAt)
+}
+
+// OCSPResponseWithTimes is OCSPResponse with producedAt and thisUpdate set
+// independently. The default stored response sets them equal (producedAt ==
+// thisUpdate); a caller uses the two-argument form to model a response whose
+// producedAt lags its thisUpdate (the stored-response maxAge window).
+func (p *PKI) OCSPResponseWithTimes(producedAt, thisUpdate time.Time) ([]byte, error) {
+	if producedAt.IsZero() || thisUpdate.IsZero() {
 		return nil, errZeroTime
 	}
 	producedAt = producedAt.UTC()
+	thisUpdate = thisUpdate.UTC()
 
 	certID, err := certIDForCert(p.Signer)
 	if err != nil {
@@ -136,7 +145,7 @@ func (p *PKI) OCSPResponse(producedAt time.Time) ([]byte, error) {
 			// CertStatus "good": the fixture (and OpenSSL's OCSP parser)
 			// encode it as context [0], primitive, empty: 80 00.
 			Status:     asn1.RawValue{FullBytes: []byte{0x80, 0x00}},
-			ThisUpdate: producedAt,
+			ThisUpdate: thisUpdate,
 		}},
 	}
 	tbsDER, err := asn1.Marshal(tbs)

@@ -446,6 +446,67 @@ func TestVerifyTSOCSPBeforeGenTime(t *testing.T) {
 	expectFail(t, h.path(t, h.signTSContainer(t, h.tsData(t, nil, verifyT, verifyT.Add(-2*time.Minute)))), h.tsOpts(), "TSDelayTime bound")
 }
 
+// TestVerifyTSTSDelayTimeConfigurable: the TSDelayTime bound is a trust
+// parameter, overridable via VerifyOptions.TSDelayTime. An OCSP producedAt
+// 90 s after the TST genTime is outside the default 60 s bound but inside a
+// 2-minute bound, so the same container FAILS by default and PASSES with
+// TSDelayTime set to 2 minutes.
+func TestVerifyTSTSDelayTimeConfigurable(t *testing.T) {
+	h := newVerifyHarness(t)
+	// genTime (TST) = verifyT, producedAt (OCSP) = verifyT + 90 s.
+	ts := h.tsData(t, nil, verifyT, verifyT.Add(90*time.Second))
+	data := h.signTSContainer(t, ts)
+
+	// Default bound (60 s) rejects the 90 s gap.
+	expectFail(t, h.path(t, data), h.tsOpts(), "the TSDelayTime bound is")
+
+	// A 2-minute TSDelayTime accepts it.
+	o := h.tsOpts()
+	o.TSDelayTime = 2 * time.Minute
+	rep, err := Verify(h.path(t, data), o)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !rep.OK {
+		t.Fatalf("expected PASS with TSDelayTime=2min, got FAIL: %v / %v", rep.Errors, sigErrors(rep))
+	}
+}
+
+// TestVerifyTSOCSPMaxAgeConfigurable: the stored-OCSP maxAge bound
+// (producedAt - thisUpdate) is a trust parameter, overridable via
+// VerifyOptions.OCSPMaxAge. A response whose producedAt lags its thisUpdate
+// by 90 s (with the TST genTime aligned to producedAt so the TSDelayTime
+// bound is satisfied) FAILS by default (1 minute) and PASSES with
+// OCSPMaxAge set to 2 minutes.
+func TestVerifyTSOCSPMaxAgeConfigurable(t *testing.T) {
+	h := newVerifyHarness(t)
+	// TST genTime and OCSP producedAt both at verifyT+90s (so the
+	// TSDelayTime gap is 0), OCSP thisUpdate at verifyT (so producedAt -
+	// thisUpdate = 90 s).
+	ocspTime := verifyT.Add(90 * time.Second)
+	ocsp, err := h.pki.OCSPResponseWithTimes(ocspTime, verifyT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ts := h.tsData(t, nil, ocspTime, ocspTime)
+	ts.OCSPResponse = ocsp
+	data := h.signTSContainer(t, ts)
+
+	// Default bound (1 minute) rejects the 90 s gap.
+	expectFail(t, h.path(t, data), h.tsOpts(), "after thisUpdate (max")
+
+	// A 2-minute OCSPMaxAge accepts it.
+	o := h.tsOpts()
+	o.OCSPMaxAge = 2 * time.Minute
+	rep, err := Verify(h.path(t, data), o)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !rep.OK {
+		t.Fatalf("expected PASS with OCSPMaxAge=2min, got FAIL: %v / %v", rep.Errors, sigErrors(rep))
+	}
+}
+
 // TestVerifyTSOCSPWrongCertID: an OCSP response for a DIFFERENT
 // certificate (another PKI's signer) must fail the certID match.
 func TestVerifyTSOCSPWrongCertID(t *testing.T) {

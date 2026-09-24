@@ -623,17 +623,20 @@ func decodeBase64(s string) ([]byte, error) {
 
 // --- TS profile checks (T8b, ADR 0003) ---
 
-// tsDelayTime is the collector's TSDelayTime (the trust YAML
-// "tsdelaytime: 60"):
-// the bound of the TST genTime and OCSP producedAt difference
-// (ADR 0003 section 2): 0 <= producedAt - genTime <= tsDelayTime.
-const tsDelayTime = 60 * time.Second
+// defaultTSDelayTime is the built-in default for VerifyOptions.TSDelayTime:
+// the collector's TSDelayTime (the trust YAML "tsdelaytime: 60"), the bound
+// of the TST genTime and OCSP producedAt difference (ADR 0003 section 2):
+// 0 <= producedAt - genTime <= TSDelayTime. It is a trust parameter; a
+// caller overrides it with VerifyOptions.TSDelayTime.
+const defaultTSDelayTime = 60 * time.Second
 
-// ocspThisUpdateMaxAge is the collector's OCSP maxAge (maxAge = 1
-// minute) for the STORED (offline) response path: the bound of
-// producedAt - thisUpdate. The now-based skew/age checks apply to the
-// LIVE path only and never run on stored responses.
-const ocspThisUpdateMaxAge = 1 * time.Minute
+// defaultOCSPThisUpdateMaxAge is the built-in default for
+// VerifyOptions.OCSPMaxAge: the collector's OCSP maxAge (1 minute) for the
+// STORED (offline) response path: the bound of producedAt - thisUpdate. The
+// now-based skew/age checks apply to the LIVE path only and never run on
+// stored responses. It is a trust parameter; a caller overrides it with
+// VerifyOptions.OCSPMaxAge.
+const defaultOCSPThisUpdateMaxAge = 1 * time.Minute
 
 var (
 	// oidOCSPBasic is the id-pkix-OCSP BasicOCSPResponse content type
@@ -679,10 +682,10 @@ func checkTSProperties(obj, sv *etree.Element, cert *x509.Certificate, declaredS
 	if !ok {
 		return
 	}
-	// The collector's timestamp/OCSP time-mismatch bound (ADR 0003 section 2).
-	if diff := producedAt.Sub(genTime); diff < 0 || diff > tsDelayTime {
+	// The caller's timestamp/OCSP time-mismatch bound (ADR 0003 section 2).
+	if diff := producedAt.Sub(genTime); diff < 0 || diff > ts.tsDelayTime {
 		fail("%s: OCSP producedAt %s and TST genTime %s differ by %s, the TSDelayTime bound is %s",
-			name, producedAt.UTC().Format(time.RFC3339), genTime.UTC().Format(time.RFC3339), diff, tsDelayTime)
+			name, producedAt.UTC().Format(time.RFC3339), genTime.UTC().Format(time.RFC3339), diff, ts.tsDelayTime)
 		return
 	}
 	report.SigningTime = genTime
@@ -953,9 +956,9 @@ func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time
 			rd.ProducedAt.UTC().Format(time.RFC3339), single.ThisUpdate.UTC().Format(time.RFC3339))
 		return time.Time{}, false
 	}
-	if age := rd.ProducedAt.Sub(single.ThisUpdate); age > ocspThisUpdateMaxAge {
+	if age := rd.ProducedAt.Sub(single.ThisUpdate); age > ts.ocspThisUpdateMaxAge {
 		fail("%s: OCSP producedAt %s is %s after thisUpdate (max %s)", name,
-			rd.ProducedAt.UTC().Format(time.RFC3339), age, ocspThisUpdateMaxAge)
+			rd.ProducedAt.UTC().Format(time.RFC3339), age, ts.ocspThisUpdateMaxAge)
 		return time.Time{}, false
 	}
 	return rd.ProducedAt, true

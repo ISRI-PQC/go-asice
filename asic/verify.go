@@ -75,6 +75,19 @@ type VerifyOptions struct {
 	// collector's issuer fallback).
 	OCSPRespondersPEM []byte
 
+	// --- TS-profile trust bounds (ProfileTS; ADR 0003) ---
+	// These are trust parameters, not algorithmic constants: the caller
+	// supplies the policy its trust store enforces. Zero means the
+	// built-in default (the Estonian e-voting collector's value).
+
+	// TSDelayTime bounds |OCSP producedAt - TST genTime| (the trust YAML
+	// "tsdelaytime"). Zero means the default (60 s).
+	TSDelayTime time.Duration
+
+	// OCSPMaxAge bounds (OCSP producedAt - thisUpdate) for the stored
+	// (offline) response. Zero means the default (1 minute).
+	OCSPMaxAge time.Duration
+
 	// --- Crypto modules (ADR 0004) ---
 
 	// DigestModule computes the reference digests (data files,
@@ -170,12 +183,22 @@ func Verify(containerPath string, opts VerifyOptions) (*Report, error) {
 		if err != nil {
 			return nil, fmt.Errorf("asic: OCSP responders: %w", err)
 		}
+		tsDelayTime := opts.TSDelayTime
+		if tsDelayTime <= 0 {
+			tsDelayTime = defaultTSDelayTime
+		}
+		ocspThisUpdateMaxAge := opts.OCSPMaxAge
+		if ocspThisUpdateMaxAge <= 0 {
+			ocspThisUpdateMaxAge = defaultOCSPThisUpdateMaxAge
+		}
 		ts = &tsContext{
-			roots:          roots,
-			intermediates:  intermediates,
-			ocspResponders: ocspResponders,
-			ocspModule:     opts.OCSPModule,
-			tstVerifier:    opts.TSTVerifier,
+			roots:                  roots,
+			intermediates:          intermediates,
+			ocspResponders:         ocspResponders,
+			ocspModule:             opts.OCSPModule,
+			tstVerifier:            opts.TSTVerifier,
+			tsDelayTime:            tsDelayTime,
+			ocspThisUpdateMaxAge:   ocspThisUpdateMaxAge,
 		}
 	}
 	raw, err := os.ReadFile(containerPath)
@@ -207,6 +230,11 @@ type tsContext struct {
 	// ds:SignatureValue imprint (ADR 0004; the TSA signer pool is
 	// configured on the verifier).
 	tstVerifier asiccrypto.TSTVerifierModule
+	// tsDelayTime and ocspThisUpdateMaxAge are the TS-profile trust
+	// bounds (TSDelayTime and the stored-OCSP maxAge); the VerifyOptions
+	// values, or the defaults when those are zero.
+	tsDelayTime          time.Duration
+	ocspThisUpdateMaxAge time.Duration
 }
 
 // verifyModules bundles the injected BES-level inputs for one Verify

@@ -17,9 +17,11 @@ import (
 	tcrypto "github.com/isri-pqc/go-asice/tsa/crypto"
 )
 
-// maxResponseSize is the maximum accepted timestamp-reply body size
-// (10 KiB; the limit of the Estonian e-voting collector's TSP client).
-const maxResponseSize = 10240
+// defaultMaxResponseSize is the built-in default for Client.MaxResponseSize:
+// the maximum accepted timestamp-reply body size (10 KiB; the limit of the
+// Estonian e-voting collector's TSP client). It is a defense limit, not a
+// trust parameter; a caller overrides it with Client.MaxResponseSize.
+const defaultMaxResponseSize = 10240
 
 // OidSHA256 is the SHA-256 digest algorithm OID (RFC 3161). The client
 // hashes the queried data with SHA-256, as the collector's TSP client does.
@@ -71,6 +73,12 @@ type Client struct {
 	// HTTPClient is the HTTP client used for requests (default
 	// defaultHTTPClient, bounded by DefaultTimeout).
 	HTTPClient *http.Client
+
+	// MaxResponseSize is the maximum accepted timestamp-reply body size in
+	// bytes. Zero means the default (defaultMaxResponseSize = 10240, the
+	// collector's TSP client limit). Set it larger to accept bigger tokens
+	// (e.g. a TSA that embeds a full certificate chain).
+	MaxResponseSize int
 }
 
 // NewClient returns a Client with the collector-equivalent defaults
@@ -255,6 +263,15 @@ func isRetryable(err error) bool {
 	return errors.As(err, &t) && t.retryable
 }
 
+// maxResponseSize returns the configured response-body cap, or the built-in
+// default when MaxResponseSize is zero.
+func (c *Client) maxResponseSize() int {
+	if c.MaxResponseSize > 0 {
+		return c.MaxResponseSize
+	}
+	return defaultMaxResponseSize
+}
+
 func (c *Client) do(ctx context.Context, hc *http.Client, reqDER []byte) ([]byte, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.URL, bytes.NewReader(reqDER))
 	if err != nil {
@@ -276,12 +293,12 @@ func (c *Client) do(ctx context.Context, hc *http.Client, reqDER []byte) ([]byte
 		return nil, fmt.Errorf("tsa: unexpected response content type %q, want %q", ct, ContentTypeReply)
 	}
 
-	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize+1))
+	body, err := io.ReadAll(io.LimitReader(httpResp.Body, int64(c.maxResponseSize())+1))
 	if err != nil {
 		return nil, &tsErr{retryable: true, err: fmt.Errorf("tsa: read response body: %w", err)}
 	}
-	if len(body) > maxResponseSize {
-		return nil, fmt.Errorf("tsa: response body exceeds %d bytes", maxResponseSize)
+	if len(body) > c.maxResponseSize() {
+		return nil, fmt.Errorf("tsa: response body exceeds %d bytes", c.maxResponseSize())
 	}
 	return body, nil
 }

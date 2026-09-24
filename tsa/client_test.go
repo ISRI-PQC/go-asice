@@ -10,6 +10,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -274,5 +275,42 @@ func TestClientPolicy(t *testing.T) {
 	c3.Policy = asn1.ObjectIdentifier{0, 4, 0, 2023, 1, 2}
 	if _, _, err := c3.Create(context.Background(), data, nil); err == nil {
 		t.Fatalf("Client.Create accepted a token with the wrong policy")
+	}
+}
+
+
+// TestClientMaxResponseSize: the response-body cap is a Client field. A
+// reply larger than the default 10240-byte cap is rejected by the size gate;
+// raising Client.MaxResponseSize gets past the gate (the failure then comes
+// from parsing the oversized body, not the size check).
+func TestClientMaxResponseSize(t *testing.T) {
+	p := newTestPKI(t)
+	const big = 10240 + 512
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", ContentTypeReply)
+		if _, err := w.Write(make([]byte, big)); err != nil {
+			t.Errorf("write oversized body: %v", err)
+		}
+	}))
+	defer server.Close()
+
+	// Default cap (10240) rejects the oversized body.
+	c := testClient(server.URL)
+	c.TSTSigners = []*x509.Certificate{p.TSA.Certificate}
+	_, _, err := c.Create(context.Background(), []byte("data"), nil)
+	if err == nil || !strings.Contains(err.Error(), "response body exceeds") {
+		t.Fatalf("expected the response-size error, got: %v", err)
+	}
+
+	// A larger cap gets past the size gate.
+	c2 := testClient(server.URL)
+	c2.TSTSigners = []*x509.Certificate{p.TSA.Certificate}
+	c2.MaxResponseSize = big
+	_, _, err = c2.Create(context.Background(), []byte("data"), nil)
+	if err == nil {
+		t.Fatal("expected an error parsing the oversized body, got nil")
+	}
+	if strings.Contains(err.Error(), "response body exceeds") {
+		t.Fatalf("with MaxResponseSize=%d the size gate should not fire, got: %v", big, err)
 	}
 }
