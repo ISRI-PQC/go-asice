@@ -27,12 +27,12 @@ and containers.
   file digests, the signature, the certificate chain at signing time,
   and — for the TS profile — the embedded TST and OCSP values. The
   `verify` command runs these.
-- **Interop** — the design target is the **Estonian e-voting
-  collector**: containers produced here must verify under it.
-  Interoperability is enforced by an external acceptance harness
-  (maintained outside this repo) that verifies CLI-produced containers
-  against the collector. In-repo, behavior is pinned by the hermetic
-  test PKI and the golden-file fixtures in `test/samples/`.
+- **Interop** — the design target is the **reference implementation**:
+  containers produced here must verify under it. Interoperability is
+  enforced by an external acceptance harness (maintained outside this
+  repo) that verifies CLI-produced containers against the reference
+  implementation. In-repo, behavior is pinned by the hermetic test PKI
+  and the golden-file fixtures in `test/samples/`.
 
 ## Layout
 
@@ -41,6 +41,7 @@ and containers.
 | `xades/`        | XAdES property builders (SignedProperties, UnsignedProperties)         | builds the XAdES SP/USP in the signature document |
 | `asic/`         | container writer, BES/TS signing, `Create` orchestration, self-verify  | the core ASiC-E create and verify path            |
 | `tsa/`          | RFC 3161 codecs + HTTP client + validator (+ exported test TSA server) | parse and verify TSTs (issue them in tests)       |
+| `ocsp/`         | RFC 6960 request/response codecs, AIA resolution, HTTP fetch           | the `ocsp fetch` command (fresh stored OCSP)      |
 | `testutil/`     | exported hermetic test PKI incl. OCSP/TST generation (test support)    | deterministic, test PKI                 |
 | `test/samples/` | hermetic fixtures, generated — see that README                         | self-consistency pins for the golden tests        |
 | `cmd/asice`     | the CLI (below)                                                        | the user-facing entry point                       |
@@ -67,11 +68,16 @@ go test ./... -count=1
 ```
 asice create -o out.asice --cert signer.pem --key signer.key [--chain chain.pem]
     [--profile bes|ts] [--ocsp-file ocsp.der] [--tst <tsa-url>]
-    [--tst-signers tsa.pem] [--signing-time <RFC3339>] doc1 [doc2 ...]
+    [--tst-signers tsa.pem] [--tsdelay <duration>]
+    [--signing-time <RFC3339>] doc1 [doc2 ...]
 
 asice verify in.asice --roots roots.pem [--intermediates int.pem]
     [--tst-signers tsa.pem] [--ocsp-responders ocsp-responder.pem]
-    [--profile bes|ts]
+    [--profile bes|ts] [--tsdelay <duration>]
+
+asice ocsp fetch --cert signer.pem --out ocsp.der
+    [--issuer issuer.pem | --chain chain.pem] [--url <responder-url>]
+    [--timeout 10s]
 ```
 
 Exit codes: `0` ok, `1` create/verify failure, `2` usage error.
@@ -98,6 +104,10 @@ and a hidden `man` command (manpage generation).
 - `--tst-signers` — **ts profile**: PEM with the TSA signing
   certificate(s) (the TSA client identifies and validates the token
   signer against these).
+- `--tsdelay` — **ts profile**: explicit TSDelayTime bound (0 <= OCSP
+  producedAt − TST genTime <= `--tsdelay`). When omitted the bound is
+  taken from the TST's TSA policy; with neither source create fails
+  before writing the container.
 - `--signing-time` — RFC 3339 signing time; default: now (UTC). For the
   ts profile use one consistent time: signing time = OCSP producedAt =
   TST genTime.
@@ -115,9 +125,33 @@ and a hidden `man` command (manpage generation).
   when absent the embedded responder is matched against the signer's
   issuer instead.
 - `--profile` — `bes` (default) or `ts`.
+- `--tsdelay` — **ts profile**: explicit TSDelayTime bound (0 <= OCSP
+  producedAt − TST genTime <= `--tsdelay`). When omitted the bound is
+  taken from the TST's TSA policy; with neither source verification
+  fails.
 
 Prints a human-readable report (data files, per-signature status with
 signer and signing time, and actionable errors).
+
+### ocsp fetch
+
+Fetches a fresh stored OCSP response for a signer certificate — the
+`--ocsp-file` input for the ts profile. Builds the RFC 6960 request
+from the signer certificate and writes the full `OCSPResponse` DER
+(byte-exact) to the output path.
+
+- `--cert` — the signer certificate, a single PEM (required).
+- `--out` — output path for the `OCSPResponse` DER (required).
+- `--issuer` — the signer's issuer certificate, a single PEM; wins
+  over `--chain`.
+- `--chain` — PEM chain; the certificate whose subject matches the
+  signer's issuer name is the issuer.
+- `--url` — OCSP responder URL; default: the signer's AIA id-ad-ocsp
+  entry.
+- `--timeout` — HTTP client timeout (default `10s`).
+
+The responder must answer `successful` with a `good` status for the
+signer; any other status or a non-200 response is a failure (exit 1).
 
 ## Examples
 
@@ -128,10 +162,12 @@ asice create -o out.asice --cert signer.pem --key signer.key --profile bes contr
 asice verify out.asice --roots root.pem --intermediates issuer.pem --profile bes
 ```
 
-TS (against a live TSA; one consistent time — here the OCSP response's
-producedAt — for `--signing-time`):
+TS (against a live TSA and OCSP responder; one consistent time — here
+the OCSP response's producedAt — for `--signing-time`):
 
 ```
+asice ocsp fetch --cert signer.pem --chain ocsp-responder-then-ca.pem \
+    --out ocsp.der
 asice create -o out.asice --cert signer.pem --key signer.key --profile ts \
     --chain ocsp-responder-then-ca.pem --ocsp-file ocsp.der \
     --tst https://tsa.example/tsp --tst-signers tsa.pem \
@@ -153,6 +189,8 @@ primitives and holds no keys of its own.
 - `tsa/crypto` — OID-keyed message digests, CMS SignerInfo signature
   verification, and TSA chain building with key/extended-key usage
   gating.
+- `ocsp/crypto` — the RFC 6960 CertID message digests (SHA-1; the
+  algorithm the standard fixes for the certificate identifier).
 
 The standard-library implementations (`NewStd*` constructors) cover RSA
 PKCS#1 v1.5 and ECDSA P-256/384/521. The XML-DSig signature value is
@@ -176,8 +214,8 @@ inclusive C14N 1.1, ZIP magic/manifest/entry layout, base64 wrapping;
 and OCSP embedding, single-time-T pattern; 0004: crypto agility —
 crypto behind per-domain interfaces; 0005: signature XML layout is
 house style) and pinned by the golden tests against `test/samples/`,
-which holds the hermetic fixtures. Interoperability with the Estonian
-e-voting collector is the design target and is enforced by the external
+which holds the hermetic fixtures. Interoperability with the reference
+implementation is the design target and is enforced by the external
 acceptance harness maintained outside this repo.
 
 ## Dependencies

@@ -10,7 +10,6 @@ package ocsp
 import (
 	"bytes"
 	"context"
-	"crypto/sha1"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/asn1"
@@ -20,6 +19,8 @@ import (
 	"net/http"
 	"strings"
 	"time"
+
+	ocspcrypto "github.com/isri-pqc/go-asice/ocsp/crypto"
 )
 
 // Response media types (RFC 6960 section 2.2).
@@ -50,11 +51,15 @@ type CertID struct {
 }
 
 // CertIDForSigner computes the RFC 6960 section 4.1.1 CertID of signer:
-// hashAlgorithm SHA-1 (1.3.14.3.1.7), issuerNameHash = SHA-1 of the
+// hashAlgorithm SHA-1 (1.3.14.3.2.26), issuerNameHash = SHA-1 of the
 // BIT STRING contents of issuer.RawSubject, issuerKeyHash = SHA-1 of
 // the BIT STRING contents of issuer.RawSubjectPublicKeyInfo,
-// serialNumber = the signer's serial.
-func CertIDForSigner(signer, issuer *x509.Certificate) (CertID, error) {
+// serialNumber = the signer's serial. The digests are computed through
+// dm (ADR 0004: the domain performs no direct crypto primitives).
+func CertIDForSigner(dm ocspcrypto.DigestModule, signer, issuer *x509.Certificate) (CertID, error) {
+	if dm == nil {
+		return CertID{}, fmt.Errorf("ocsp: CertIDForSigner requires the crypto modules (DigestModule)")
+	}
 	if signer == nil || issuer == nil {
 		return CertID{}, fmt.Errorf("ocsp: signer and issuer certificates are required")
 	}
@@ -65,15 +70,22 @@ func CertIDForSigner(signer, issuer *x509.Certificate) (CertID, error) {
 	if _, err := asn1.Unmarshal(issuer.RawSubjectPublicKeyInfo, &spki); err != nil {
 		return CertID{}, fmt.Errorf("ocsp: issuer SPKI: %w", err)
 	}
-	nameHash := sha1.Sum(issuer.RawSubject)
-	keyHash := sha1.Sum(spki.Key.Bytes)
+	digest := dm.GetDigestFunc(oidSHA1)
+	nameHash, err := digest(issuer.RawSubject)
+	if err != nil {
+		return CertID{}, fmt.Errorf("ocsp: issuerNameHash: %w", err)
+	}
+	keyHash, err := digest(spki.Key.Bytes)
+	if err != nil {
+		return CertID{}, fmt.Errorf("ocsp: issuerKeyHash: %w", err)
+	}
 	return CertID{
 		HashAlgorithm: pkix.AlgorithmIdentifier{
 			Algorithm:  oidSHA1,
 			Parameters: asn1.RawValue{FullBytes: asn1.NullBytes},
 		},
-		IssuerNameHash: nameHash[:],
-		IssuerKeyHash:  keyHash[:],
+		IssuerNameHash: nameHash,
+		IssuerKeyHash:  keyHash,
 		SerialNumber:   signer.SerialNumber,
 	}, nil
 }
@@ -291,6 +303,10 @@ func Parse(der []byte) (*Response, error) {
 
 // FetchOptions configures Fetch.
 type FetchOptions struct {
+	// DigestModule computes the CertID digests (ADR 0004: the domain
+	// performs no direct crypto primitives). Required; a zero value is
+	// a hard error at Fetch.
+	DigestModule ocspcrypto.DigestModule
 	// Signer is the attested certificate. Required.
 	Signer *x509.Certificate
 	// Issuer is the signer's issuer certificate (used to build the
@@ -316,6 +332,9 @@ type FetchOptions struct {
 // be responseStatus successful (0) with responseType
 // id-pkix-OCSPBasic; anything else is an actionable error.
 func Fetch(ctx context.Context, opts FetchOptions) ([]byte, *Response, error) {
+	if opts.DigestModule == nil {
+		return nil, nil, fmt.Errorf("ocsp: Fetch requires the crypto modules (DigestModule)")
+	}
 	if opts.Signer == nil {
 		return nil, nil, fmt.Errorf("ocsp: no signer certificate supplied")
 	}
@@ -326,7 +345,7 @@ func Fetch(ctx context.Context, opts FetchOptions) ([]byte, *Response, error) {
 	if issuer == nil {
 		return nil, nil, fmt.Errorf("ocsp: no issuer certificate for the signer (pass --issuer or --chain)")
 	}
-	cid, err := CertIDForSigner(opts.Signer, issuer)
+	cid, err := CertIDForSigner(opts.DigestModule, opts.Signer, issuer)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/isri-pqc/go-asice/ocsp"
+	ocspcrypto "github.com/isri-pqc/go-asice/ocsp/crypto"
 	"github.com/isri-pqc/go-asice/testutil"
 )
 
@@ -108,9 +109,10 @@ func TestFetchAIA(t *testing.T) {
 	// AIA path: no URL supplied; the signer's AIA points at the server.
 	// Issuer resolved from the chain.
 	der, resp, err := ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer:  p.Signer.Certificate,
-		Chain:   []*x509.Certificate{p.Issuer.Certificate},
-		Timeout: 5 * time.Second,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		Chain:        []*x509.Certificate{p.Issuer.Certificate},
+		Timeout:      5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("Fetch (AIA): %v", err)
@@ -155,10 +157,11 @@ func TestFetchURLOverride(t *testing.T) {
 	}
 	pki = p
 	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer:  p.Signer.Certificate,
-		Issuer:  p.Issuer.Certificate,
-		URL:     srv.URL,
-		Timeout: 5 * time.Second,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		Issuer:       p.Issuer.Certificate,
+		URL:          srv.URL,
+		Timeout:      5 * time.Second,
 	})
 	if err != nil {
 		t.Fatalf("Fetch (--url override): %v", err)
@@ -183,10 +186,11 @@ func TestFetchNonSuccessfulStatus(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer:  p.Signer.Certificate,
-		Issuer:  p.Issuer.Certificate,
-		URL:     srv.URL,
-		Timeout: 5 * time.Second,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		Issuer:       p.Issuer.Certificate,
+		URL:          srv.URL,
+		Timeout:      5 * time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "malformedRequest") {
 		t.Fatalf("Fetch error = %v, want the malformedRequest failure", err)
@@ -220,10 +224,11 @@ func TestFetchWrongResponseType(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer:  p.Signer.Certificate,
-		Issuer:  p.Issuer.Certificate,
-		URL:     srv.URL,
-		Timeout: 5 * time.Second,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		Issuer:       p.Issuer.Certificate,
+		URL:          srv.URL,
+		Timeout:      5 * time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "responseType") {
 		t.Fatalf("Fetch error = %v, want the responseType failure", err)
@@ -238,8 +243,9 @@ func TestFetchNoURL(t *testing.T) {
 	}
 	// The OCSP responder leaf has no AIA.
 	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer: p.OCSPResponder.Certificate,
-		Issuer: p.Issuer.Certificate,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.OCSPResponder.Certificate,
+		Issuer:       p.Issuer.Certificate,
 	})
 	if err == nil || !strings.Contains(err.Error(), "no OCSP responder URL") {
 		t.Fatalf("Fetch error = %v, want the no OCSP responder URL failure", err)
@@ -252,9 +258,10 @@ func TestFetchNoIssuer(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer:  p.Signer.Certificate,
-		URL:     "http://127.0.0.1:1",
-		Timeout: 5 * time.Second,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		URL:          "http://127.0.0.1:1",
+		Timeout:      5 * time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "no issuer certificate") {
 		t.Fatalf("Fetch error = %v, want the no issuer certificate failure", err)
@@ -271,12 +278,27 @@ func TestFetchNon200(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
-		Signer:  p.Signer.Certificate,
-		Issuer:  p.Issuer.Certificate,
-		URL:     srv.URL,
-		Timeout: 5 * time.Second,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		Issuer:       p.Issuer.Certificate,
+		URL:          srv.URL,
+		Timeout:      5 * time.Second,
 	})
 	if err == nil || !strings.Contains(err.Error(), "500") || !strings.Contains(err.Error(), "responder is down") {
 		t.Fatalf("Fetch error = %v, want the 500 + server body", err)
+	}
+}
+
+func TestFetchNoDigestModule(t *testing.T) {
+	p, err := testutil.NewPKI(testutil.Options{Now: fetchT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _, err = ocsp.Fetch(context.Background(), ocsp.FetchOptions{
+		Signer: p.Signer.Certificate,
+		Issuer: p.Issuer.Certificate,
+	})
+	if err == nil || !strings.Contains(err.Error(), "requires the crypto modules") {
+		t.Fatalf("Fetch error = %v, want the requires-the-crypto-modules failure", err)
 	}
 }

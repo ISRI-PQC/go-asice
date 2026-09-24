@@ -16,7 +16,8 @@
 
 ## 1. Decision
 
-Every cryptographic operation in the `asic` and `tsa` domains is
+Every cryptographic operation in the `asic`, `tsa`, and `ocsp`
+domains is
 behind a small per-domain interface. Domain code holds NO
 `crypto.Signer`/`crypto.PrivateKey` for its operations and performs
 NO direct crypto primitives: it digests, signs, and verifies through
@@ -70,6 +71,14 @@ replaced by the pre-constructed TST verifier).
 
 `xades.SignedProperties`/`xades.Check*` take the digest module
 (`dm`) as a parameter; `xades` holds no other crypto.
+
+### ocsp domain (`ocsp/crypto`)
+
+| Module | Surface |
+|---|---|
+| `DigestModule` | `GetDigestFunc(oid) (func([]byte) ([]byte, error), error)` — the RFC 6960 CertID message digests (issuerNameHash, issuerKeyHash; SHA-1 per RFC 6960 section 4.1.1). |
+
+`ocsp.CertIDForSigner` takes the module as a parameter; `ocsp.FetchOptions` carries it; a zero value is a hard error at `Fetch` ("requires the crypto modules"). The std implementation (`NewStdDigestModule`) supports SHA-1 only — the algorithm the standard fixes for the CertID.
 
 ## 3. What stays in the domain (the collector interop contract)
 

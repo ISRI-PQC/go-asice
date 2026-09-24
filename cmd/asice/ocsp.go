@@ -13,6 +13,7 @@ import (
 
 	"github.com/isri-pqc/go-asice/asic"
 	"github.com/isri-pqc/go-asice/ocsp"
+	ocspcrypto "github.com/isri-pqc/go-asice/ocsp/crypto"
 	"github.com/spf13/cobra"
 )
 
@@ -135,11 +136,12 @@ func runOCSPFetchCmd(ctx context.Context, stdout io.Writer, in ocspFetchInput) e
 		issuer = issuers[0]
 	}
 	der, resp, err := ocsp.Fetch(ctx, ocsp.FetchOptions{
-		Signer:  signers[0],
-		Issuer:  issuer,
-		Chain:   chain,
-		URL:     in.url,
-		Timeout: in.timeout,
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       signers[0],
+		Issuer:       issuer,
+		Chain:        chain,
+		URL:          in.url,
+		Timeout:      in.timeout,
 	})
 	if err != nil {
 		return err
