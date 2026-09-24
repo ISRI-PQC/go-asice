@@ -127,6 +127,27 @@ func (r Request) Encode() ([]byte, error) {
 	return der, nil
 }
 
+// EncodeWrapped serializes the request as the canonical body wrapped in
+// one extra SEQUENCE. The reference implementation's responder accepts
+// that shape and rejects the bare canonical body (HTTP 400
+// "invalid OCSPRequest", observed on its live endpoint); Fetch sends
+// the canonical encoding first and falls back to this variant on a 400.
+func (r Request) EncodeWrapped() ([]byte, error) {
+	inner, err := r.Encode()
+	if err != nil {
+		return nil, err
+	}
+	var wrap struct {
+		Body asn1.RawValue
+	}
+	wrap.Body.FullBytes = inner
+	der, err := asn1.Marshal(wrap)
+	if err != nil {
+		return nil, fmt.Errorf("ocsp: marshal wrapped OCSPRequest: %w", err)
+	}
+	return der, nil
+}
+
 // ParseRequest decodes a DER OCSPRequest into its single CertID (the
 // shape this package and any conformant request carry).
 func ParseRequest(der []byte) (Request, error) {
@@ -349,9 +370,25 @@ func Fetch(ctx context.Context, opts FetchOptions) ([]byte, *Response, error) {
 	if err != nil {
 		return nil, nil, err
 	}
+	// Request shapes, in order: the RFC 6960 section 2.2 canonical
+	// body, then the same body wrapped in one extra SEQUENCE. The
+	// reference implementation's responder accepts the wrapped shape
+	// and rejects the canonical body (HTTP 400 "invalid OCSPRequest",
+	// observed on its live endpoint), so Fetch tries both.
 	reqDER, err := Request{CertID: cid}.Encode()
 	if err != nil {
 		return nil, nil, err
+	}
+	wrappedDER, err := Request{CertID: cid}.EncodeWrapped()
+	if err != nil {
+		return nil, nil, err
+	}
+	shapes := []struct {
+		name string
+		der  []byte
+	}{
+		{"RFC 6960 canonical", reqDER},
+		{"wrapped (extra SEQUENCE)", wrappedDER},
 	}
 	url := opts.URL
 	if url == "" {
@@ -364,30 +401,46 @@ func Fetch(ctx context.Context, opts FetchOptions) ([]byte, *Response, error) {
 	if hc == nil {
 		hc = &http.Client{Timeout: opts.Timeout}
 	}
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(reqDER))
-	if err != nil {
-		return nil, nil, fmt.Errorf("ocsp: build request: %w", err)
+	var body []byte
+	var parsed *Response
+	var lastErr error
+	for i, shape := range shapes {
+		httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(shape.der))
+		if err != nil {
+			return nil, nil, fmt.Errorf("ocsp: build request: %w", err)
+		}
+		httpReq.Header.Set("Content-Type", ContentTypeRequest)
+		httpResp, err := hc.Do(httpReq)
+		if err != nil {
+			return nil, nil, fmt.Errorf("ocsp: request %s failed: %w", url, err)
+		}
+		b, err := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize+1))
+		httpResp.Body.Close()
+		if err != nil {
+			return nil, nil, fmt.Errorf("ocsp: read response body: %w", err)
+		}
+		if len(b) > maxResponseSize {
+			return nil, nil, fmt.Errorf("ocsp: response body exceeds %d bytes", maxResponseSize)
+		}
+		if httpResp.StatusCode != http.StatusOK {
+			lastErr = fmt.Errorf("ocsp: responder %s responded with status %d (%s shape): %s",
+				url, httpResp.StatusCode, shape.name, strings.TrimSpace(string(b)))
+			// A 400 on the canonical shape is the known responder
+			// convention mismatch: retry with the wrapped shape.
+			if httpResp.StatusCode == http.StatusBadRequest && i+1 < len(shapes) {
+				continue
+			}
+			return nil, nil, lastErr
+		}
+		body = b
+		parsed, err = Parse(body)
+		if err != nil {
+			return nil, nil, err
+		}
+		break
 	}
-	httpReq.Header.Set("Content-Type", ContentTypeRequest)
-	httpResp, err := hc.Do(httpReq)
-	if err != nil {
-		return nil, nil, fmt.Errorf("ocsp: request %s failed: %w", url, err)
-	}
-	defer httpResp.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(httpResp.Body, maxResponseSize+1))
-	if err != nil {
-		return nil, nil, fmt.Errorf("ocsp: read response body: %w", err)
-	}
-	if len(body) > maxResponseSize {
-		return nil, nil, fmt.Errorf("ocsp: response body exceeds %d bytes", maxResponseSize)
-	}
-	if httpResp.StatusCode != http.StatusOK {
-		return nil, nil, fmt.Errorf("ocsp: responder %s responded with status %d: %s",
-			url, httpResp.StatusCode, strings.TrimSpace(string(body)))
-	}
-	parsed, err := Parse(body)
-	if err != nil {
-		return nil, nil, err
+	if parsed == nil {
+		return nil, nil, lastErr
 	}
 	if parsed.Status != 0 {
 		return nil, nil, fmt.Errorf("ocsp: responseStatus is %s, want successful", parsed.StatusName())

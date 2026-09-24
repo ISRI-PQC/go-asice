@@ -302,3 +302,79 @@ func TestFetchNoDigestModule(t *testing.T) {
 		t.Fatalf("Fetch error = %v, want the requires-the-crypto-modules failure", err)
 	}
 }
+
+// TestFetchWrappedShapeFallback pins the responder-shape fallback: the
+// responder accepts only the wrapped request shape (the canonical body
+// inside one extra SEQUENCE — the reference implementation's
+// convention, which rejects the bare canonical body with a 400). Fetch
+// must reach it via the fallback after its canonical attempt is rejected.
+func TestFetchWrappedShapeFallback(t *testing.T) {
+	var pki *testutil.PKI
+	var rejections int
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		cid, err := ocsp.CertIDForSigner(ocspcrypto.NewStdDigestModule(), pki.Signer.Certificate, pki.Issuer.Certificate)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		canon, err := ocsp.Request{CertID: cid}.Encode()
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		wrapped := derSeqTest(canon)
+		if !bytes.Equal(body, wrapped) {
+			rejections++
+			http.Error(w, `{"detail":"bad request: invalid OCSPRequest"}`, http.StatusBadRequest)
+			return
+		}
+		// serveOCSP decodes the canonical body: strip the wrapper
+		// header first (short or long form).
+		h := 2
+		if body[1]&0x80 != 0 {
+			h = 2 + int(body[1]&0x7f)
+		}
+		r.Body = io.NopCloser(bytes.NewReader(body[h:]))
+		serveOCSP(w, r, pki, fetchT)
+	}))
+	defer srv.Close()
+
+	p, err := testutil.NewPKI(testutil.Options{Now: fetchT, AIAOCSPURL: srv.URL})
+	if err != nil {
+		t.Fatal(err)
+	}
+	pki = p
+	der, resp, err := ocsp.Fetch(context.Background(), ocsp.FetchOptions{
+		DigestModule: ocspcrypto.NewStdDigestModule(),
+		Signer:       p.Signer.Certificate,
+		Chain:        []*x509.Certificate{p.Issuer.Certificate},
+		Timeout:      5 * time.Second,
+	})
+	if err != nil {
+		t.Fatalf("Fetch (wrapped-shape fallback): %v", err)
+	}
+	if len(der) == 0 {
+		t.Error("no response bytes returned")
+	}
+	if rejections != 1 {
+		t.Errorf("canonical-shape rejections = %d, want 1 (the fallback trigger)", rejections)
+	}
+	if resp.Status != 0 || resp.Basic == nil || !resp.Basic.Responses[0].Good() {
+		t.Errorf("decoded response: status %d, basic %+v", resp.Status, resp.Basic)
+	}
+}
+
+// derSeqTest wraps payload in a SEQUENCE (test-local, independent of the
+// production encoders; the fixtures keep the payload short-form).
+func derSeqTest(payload []byte) []byte {
+	if len(payload) >= 0x80 {
+		panic("derSeqTest: payload too long for the short form")
+	}
+	out := []byte{0x30, byte(len(payload))}
+	return append(out, payload...)
+}

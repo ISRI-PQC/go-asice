@@ -151,7 +151,18 @@ from the signer certificate and writes the full `OCSPResponse` DER
 - `--timeout` — HTTP client timeout (default `10s`).
 
 The responder must answer `successful` with a `good` status for the
-signer; any other status or a non-200 response is a failure (exit 1).
+signer. A 400 on the canonical request first triggers the wrapped-shape
+retry below; any other status, or a non-200 after the retry, is a
+failure (exit 1).
+
+**Request wire compatibility.** The request is sent first in the
+canonical RFC 6960 section 2.2 shape. Some responder deployments (the
+reference implementation's) accept only the canonical body wrapped in
+one extra `SEQUENCE` and reject the bare canonical body with HTTP 400
+(`invalid OCSPRequest`); `Fetch` therefore retries once with the
+wrapped shape on a 400. Both shapes carry the identical CertID, so the
+response handling is unchanged. See
+`TestFetchWrappedShapeFallback` in `ocsp/ocsp_test.go`.
 
 ## Examples
 
