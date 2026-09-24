@@ -463,6 +463,84 @@ func TestVerifyTSOCSPWrongCertID(t *testing.T) {
 	expectFail(t, h.path(t, h.signTSContainer(t, ts)), h.tsOpts(), "certID does not match the signer certificate")
 }
 
+// TestVerifyTSOCSPRFC6960IssuerKeyHash is the regression for the
+// RFC 6960 issuerKeyHash check (the Akamu case). The hermetic NewPKI is
+// SK-convention-coincident (the issuer's SKI equals SHA-1 of its SPKI),
+// so its OCSP responses' issuerKeyHash equals the signer's AuthorityKeyId
+// and the certID bug is invisible. NewAkamuPKI breaks that coincidence
+// (issuer SKI = SHA-256(SPKI)), so a valid RFC 6960 OCSP response
+// (issuerKeyHash = SHA-1(issuer SPKI key value), signed by the CA
+// responder with EC P-256, no embedded certs) is rejected by the
+// unpatched AuthorityKeyId-only check with "certID does not match the
+// signer certificate" and must PASS here.
+func TestVerifyTSOCSPRFC6960IssuerKeyHash(t *testing.T) {
+	p, err := testutil.NewAkamuPKI(testutil.Options{Now: verifyT})
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Sanity: the whole point is that the signer's AuthorityKeyId differs
+	// from the RFC 6960 issuerKeyHash (SHA-1 of the issuer's SPKI key value).
+	// (The test is only a regression if this non-coincidence actually holds.)
+	t.Logf("signer AKI (%d bytes) != SHA-1(issuer SPKI)", len(p.Signer.Certificate.AuthorityKeyId))
+
+	ocsp, err := testutil.OCSPResponseRFC6960(p.OCSPResponder, p.Signer, p.Issuer, verifyT)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tstSigners, err := ParsePEMCerts(p.TSA.PEM)
+	if err != nil {
+		t.Fatalf("TSA PEM: %v", err)
+	}
+	intermediates, err := ParsePEMCerts(p.Issuer.PEM)
+	if err != nil {
+		t.Fatalf("Issuer PEM: %v", err)
+	}
+	docs := []Doc{{Name: "test.txt", MediaType: "application/octet-stream", Data: []byte("verify data")}}
+	ts := TSData{
+		TimeStamp: func(d []byte) ([]byte, error) {
+			return p.TimeStampToken(d, testutil.TSTOptions{GenTime: verifyT})
+		},
+		OCSPResponse: ocsp,
+		// CA-as-responder: the issuer CA is both the OCSP responder and the
+		// signer's issuer (the xades cert values are presence-only, so the
+		// responder and CA entries may coincide).
+		Certificates: []*x509.Certificate{p.Issuer.Certificate, p.Issuer.Certificate},
+	}
+	sig, err := SignTS(0, stdSignerModule(t, p.Signer.PrivateKey), stdDigestModule(), p.Signer.Certificate, docs, verifyT, ts)
+	if err != nil {
+		t.Fatalf("SignTS: %v", err)
+	}
+	var buf bytes.Buffer
+	if err := WriteContainer(&buf, docs, sig); err != nil {
+		t.Fatalf("WriteContainer: %v", err)
+	}
+	path := filepath.Join(t.TempDir(), "container.bdoc")
+	if err := os.WriteFile(path, buf.Bytes(), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	o := stdVerifyOptions(ProfileTS)
+	o.RootsPEM = p.Root.PEM
+	o.IntermediatesPEM = p.Issuer.PEM
+	o.OCSPRespondersPEM = p.Issuer.PEM // the issuer CA is the configured responder
+	o.TSTVerifier = asiccrypto.NewStdTSTVerifierModule(tstSigners, intermediates)
+
+	rep, err := Verify(path, o)
+	if err != nil {
+		t.Fatalf("Verify hard error: %v", err)
+	}
+	if !rep.OK {
+		t.Fatalf("expected PASS, got FAIL: %v / %v", rep.Errors, sigErrors(rep))
+	}
+	s := rep.Signatures[0]
+	if !s.OK || len(s.Errors) != 0 {
+		t.Errorf("S0 TS report: %+v", s)
+	}
+	if !s.SigningTime.Equal(verifyT) {
+		t.Errorf("SigningTime: got %v, want %v (TST genTime)", s.SigningTime, verifyT)
+	}
+}
+
 // TestVerifyTSMissingTST: a TS container whose SignatureTimeStamp
 // element was removed must fail — the TST is required for the TS
 // profile (the collector's timestamp-missing rejection on an empty

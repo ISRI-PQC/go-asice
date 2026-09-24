@@ -645,13 +645,17 @@ var (
 )
 
 // ocspSignatureAlgorithms is the allowlist of OCSP response signature
-// algorithm OIDs the collector accepts (the RSA SHA-2/3/4 variants
-// only) — the interop contract, checked here; the verification itself
-// is the OCSP module's job (ADR 0004).
+// algorithm OIDs the collector accepts (the RSA SHA-2/3/4 variants and
+// the ECDSA P-256/384/S390 variants — non-SK CAs such as Akamu sign
+// their OCSP responses with EC P-256) — the interop contract, checked
+// here; the verification itself is the OCSP module's job (ADR 0004).
 var ocspSignatureAlgorithms = map[string]struct{}{
 	"1.2.840.113549.1.1.11": {},
 	"1.2.840.113549.1.1.12": {},
 	"1.2.840.113549.1.1.13": {},
+	"1.2.840.10045.4.3.2": {},
+	"1.2.840.10045.4.3.3": {},
+	"1.2.840.10045.4.3.4": {},
 }
 
 // checkTSProperties runs the TS profile checks of one signature
@@ -898,21 +902,37 @@ func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time
 		return time.Time{}, false
 	}
 	// certID match (the collector's CertID: SHA-1 of the issuer name
-	// DER, the issuer key from the AuthorityKeyId extension, the
-	// serial).
+	// DER, the issuer key, the serial).
 	nameHash := sha1.Sum(cert.RawIssuer)
 	cid := single.CertID
 	if !cid.HashAlgorithm.Algorithm.Equal(oidOCSPSHA1) {
 		fail("%s: the OCSP response certID hash algorithm is %s, want SHA-1 (%s)", name, cid.HashAlgorithm.Algorithm, oidOCSPSHA1)
 		return time.Time{}, false
 	}
-	if !bytes.Equal(cid.IssuerNameHash, nameHash[:]) || !bytes.Equal(cid.IssuerKeyHash, cert.AuthorityKeyId) ||
+	// IssuerKeyHash: accept the RFC 6960 value (SHA-1 of the issuer's
+	// SPKI key value) or the Estonian SK/collector convention (the
+	// signer's AuthorityKeyId). They coincide when the issuer's SKI is
+	// SHA-1(SPKI); non-SK CAs (e.g. Akamu) differ, so a conformant
+	// response only matches the RFC 6960 value. An unresolvable issuer
+	// degrades to the convention-only check (today's behavior).
+	issuer := issuerCertificate(cert, ts.roots, ts.intermediates)
+	keyHashOK := len(cert.AuthorityKeyId) > 0 && bytes.Equal(cid.IssuerKeyHash, cert.AuthorityKeyId)
+	if !keyHashOK && issuer != nil {
+		var spki struct {
+			Algorithm asn1.RawValue
+			Key       asn1.BitString
+		}
+		if _, err := asn1.Unmarshal(issuer.RawSubjectPublicKeyInfo, &spki); err == nil {
+			kh := sha1.Sum(spki.Key.Bytes)
+			keyHashOK = bytes.Equal(cid.IssuerKeyHash, kh[:])
+		}
+	}
+	if !bytes.Equal(cid.IssuerNameHash, nameHash[:]) || !keyHashOK ||
 		cid.SerialNumber.Cmp(cert.SerialNumber) != 0 {
 		fail("%s: the OCSP response certID does not match the signer certificate", name)
 		return time.Time{}, false
 	}
 	// The responder and the response signature over the tbsResponseData.
-	issuer := issuerCertificate(cert, ts.roots, ts.intermediates)
 	responder, err := ocspResponder(ts.ocspModule, rd.ResponderIDByName, basic.Certs, ts.ocspResponders, issuer, sigTime)
 	if err != nil {
 		fail("%s: OCSP responder: %v", name, err)

@@ -154,11 +154,16 @@ func NewStdOCSPVerifierModule() OCSPVerifierModule {
 
 // ocspSignatureAlgorithms maps the OCSP response signature algorithm
 // OIDs the Estonian e-voting collector accepts (the RSA SHA-2/3/4
-// variants only) to crypto/x509 algorithm identifiers.
+// variants and the ECDSA P-256/384/S390 variants — non-SK CAs such as
+// Akamu sign their OCSP responses with EC P-256) to crypto/x509
+// algorithm identifiers.
 var ocspSignatureAlgorithms = map[string]x509.SignatureAlgorithm{
 	"1.2.840.113549.1.1.11": x509.SHA256WithRSA,
 	"1.2.840.113549.1.1.12": x509.SHA384WithRSA,
 	"1.2.840.113549.1.1.13": x509.SHA512WithRSA,
+	"1.2.840.10045.4.3.2": x509.ECDSAWithSHA256,
+	"1.2.840.10045.4.3.3": x509.ECDSAWithSHA384,
+	"1.2.840.10045.4.3.4": x509.ECDSAWithSHA512,
 }
 
 func (m standardOCSPVerifierModule) VerifyResponseSignature(responder *x509.Certificate, tbs, sig []byte, sigAlgo asn1.ObjectIdentifier) error {
