@@ -19,12 +19,12 @@ import (
 
 // defaultMaxResponseSize is the built-in default for Client.MaxResponseSize:
 // the maximum accepted timestamp-reply body size (10 KiB; the limit of the
-// Estonian e-voting collector's TSP client). It is a defense limit, not a
+// reference implementation's TSP client). It is a defense limit, not a
 // trust parameter; a caller overrides it with Client.MaxResponseSize.
 const defaultMaxResponseSize = 10240
 
 // OidSHA256 is the SHA-256 digest algorithm OID (RFC 3161). The client
-// hashes the queried data with SHA-256, as the collector's TSP client does.
+// hashes the queried data with SHA-256, as the reference implementation's TSP client does.
 var OidSHA256 = asn1.ObjectIdentifier{2, 16, 840, 1, 101, 3, 4, 2, 1}
 
 // DefaultTimeout bounds a single TSA exchange (one request and
@@ -48,27 +48,27 @@ type Client struct {
 	// carries no policy field (the TSA selects its own), so when this
 	// is set, Create rejects tokens whose TSTInfo policy differs.
 	// When empty (default), any policy is accepted: the
-	// collector's TSP client never compares the policy value.
+	// reference implementation's TSP client never compares the policy value.
 	Policy asn1.ObjectIdentifier
 	// MaxAge and MaxSkew are the genTime freshness bounds applied to
-	// fresh tokens; the defaults mirror the collector's TSP client
+	// fresh tokens; the defaults mirror the reference implementation's TSP client
 	// (1 minute, 2 seconds).
 	MaxAge  time.Duration
 	MaxSkew time.Duration
 	// TSTSigners is the configured TSA-signing certificate pool used
-	// to identify the signing certificate. The Estonian e-voting
-	// collector's TSP client requires this pool and cannot verify the
+	// to identify the signing certificate. The reference
+	// implementation's TSP client requires this pool and cannot verify the
 	// token signature without it. Required.
 	TSTSigners []*x509.Certificate
 	// DigestModule computes the message imprint digest of the queried
-	// data (SHA-256, mirroring the collector's TSP client). Required.
+	// data (SHA-256, mirroring the reference implementation's TSP client). Required.
 	DigestModule tcrypto.DigestModule
 	// SignatureVerifierModule verifies the token's CMS signature
-	// (mirroring the collector's client, which verifies the token
+	// (mirroring the reference implementation's client, which verifies the token
 	// signature against its configured TSA signers). Required.
 	SignatureVerifierModule tcrypto.SignatureVerifierModule
 	// Retry is the number of additional attempts after a 5xx response
-	// or transport error (mirroring the collector's retry setting).
+	// or transport error (mirroring the reference implementation's retry setting).
 	Retry uint
 	// HTTPClient is the HTTP client used for requests (default
 	// defaultHTTPClient, bounded by DefaultTimeout).
@@ -76,12 +76,12 @@ type Client struct {
 
 	// MaxResponseSize is the maximum accepted timestamp-reply body size in
 	// bytes. Zero means the default (defaultMaxResponseSize = 10240, the
-	// collector's TSP client limit). Set it larger to accept bigger tokens
+	// reference implementation's TSP client limit). Set it larger to accept bigger tokens
 	// (e.g. a TSA that embeds a full certificate chain).
 	MaxResponseSize int
 }
 
-// NewClient returns a Client with the collector-equivalent defaults
+// NewClient returns a Client with the reference implementation-equivalent defaults
 // (MaxAge 1 minute, MaxSkew 2 seconds).
 func NewClient(url string) *Client {
 	return &Client{URL: url, MaxAge: DefaultMaxAge, MaxSkew: DefaultMaxSkew}
@@ -90,11 +90,11 @@ func NewClient(url string) *Client {
 // Create requests a time-stamp over data and validates the response.
 // It returns the token bytes (ready for xades:EncapsulatedTimeStamp)
 // and the token generation time. When nonce is nil, a random 20-byte
-// nonce is generated (as the collector's TSP client does); the TSA
+// nonce is generated (as the reference implementation's TSP client does); the TSA
 // must echo it in the TST, and Create verifies the echo.
 //
 // Create does NOT verify the signing certificate chain — it performs
-// the same checks the Estonian e-voting collector's TSP client Create
+// the same checks the reference implementation's TSP client Create
 // does (TSTInfo, imprint, nonce, signed data, signature over them,
 // freshness); run the result
 // through Validator.Check for full validation against roots.
@@ -152,7 +152,7 @@ func (c *Client) Create(ctx context.Context, data []byte, nonce *big.Int) ([]byt
 		return nil, time.Time{}, errors.New("tsa: pkiStatus 0 but no TimeStampToken in response")
 	}
 
-	// Structural + freshness validation (the checks the collector's
+	// Structural + freshness validation (the checks the reference implementation's
 	// TSP client Create applies); chain validation is Validator.Check's
 	// job.
 	v := &Validator{
@@ -225,7 +225,7 @@ func (v *Validator) checkTokenBody(token, data []byte, nonce *big.Int, now time.
 
 // submit POSTs the request and returns the raw timestamp-reply body.
 // 5xx responses and transport errors are retried (c.Retry additional
-// attempts, 1s apart), mirroring the collector's TSP client retry behavior.
+// attempts, 1s apart), mirroring the reference implementation's TSP client retry behavior.
 func (c *Client) submit(ctx context.Context, reqDER []byte) ([]byte, error) {
 	hc := c.HTTPClient
 	if hc == nil {
@@ -249,7 +249,7 @@ func (c *Client) submit(ctx context.Context, reqDER []byte) ([]byte, error) {
 }
 
 // tsErr marks transport-level and 5xx response errors so submit can
-// decide whether to retry (mirroring the collector's retry decision).
+// decide whether to retry (mirroring the reference implementation's retry decision).
 type tsErr struct {
 	retryable bool
 	err       error

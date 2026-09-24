@@ -1,5 +1,5 @@
 // Signature XML for ASiC-E containers: the minimal BES shape the
-// Estonian e-voting collector's schema-driven parser accepts (PLAN.md
+// reference implementation's schema-driven parser accepts (PLAN.md
 // §1.2). The document is built with
 // the xmlsig high-level builder — WithRoot for wrapper-root placement,
 // WithExternalRef for the data files, WithEmbeddedElement + RefTargetId
@@ -11,8 +11,8 @@
 //
 // The layout is not part of the interop contract: the digests are
 // self-referential (we sign the canonical form of the final rendering,
-// the collector re-canonicalizes the parsed document), so the hard
-// constraints are the TST-flow self-consistency and the collector's
+// the reference implementation re-canonicalizes the parsed document), so the hard
+// constraints are the TST-flow self-consistency and the reference implementation's
 // structural parser (element
 // shape/order/Id/Type). The byte-parity quality bar (C14N goldens,
 // asic/canon_golden_test.go and asic/sp_digest_golden_test.go) is
@@ -34,8 +34,8 @@ import (
 	"github.com/isri-pqc/go-xmlsig/spec"
 )
 
-// Algorithm URIs used by SignedInfo itself (the Estonian e-voting
-// collector's accepted set; ADR 0001 section 5). XAdES-side URIs and
+// Algorithm URIs used by SignedInfo itself (the reference
+// implementation's accepted set; ADR 0001 section 5). XAdES-side URIs and
 // namespaces live in the xades package.
 const (
 	algC14N11      = "http://www.w3.org/2006/12/xml-c14n11"
@@ -57,7 +57,7 @@ const xmlDeclInst = `version="1.0" encoding="UTF-8" standalone="no"`
 // Id, reference Ids, SignatureValue Id, SignedProperties Id, the
 // QualifyingProperties Target) derives from it (S{k} scheme, xades.Ids).
 // Repeated calls with k = 0, 1, 2, ... yield independent, consistently
-// identified signature documents; the collector requires each signature
+// identified signature documents; the reference implementation requires each signature
 // document
 // to reference ALL data files plus its own SignedProperties (ADR 0002,
 // section 1).
@@ -194,7 +194,7 @@ func serializeDoc(doc *etree.Document) ([]byte, error) {
 
 // canonicalizeElement canonicalizes el with inclusive C14N 1.1 in its
 // in-document namespace context (detached root re-declares the in-scope
-// namespaces, mirroring the collector's C14N writer).
+// namespaces, mirroring the reference implementation's C14N writer).
 func canonicalizeElement(el *etree.Element) ([]byte, error) {
 	ctx, err := etreeutils.NSBuildParentContext(el)
 	if err != nil {

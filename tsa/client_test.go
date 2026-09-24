@@ -278,7 +278,6 @@ func TestClientPolicy(t *testing.T) {
 	}
 }
 
-
 // TestClientMaxResponseSize: the response-body cap is a Client field. A
 // reply larger than the default 10240-byte cap is rejected by the size gate;
 // raising Client.MaxResponseSize gets past the gate (the failure then comes

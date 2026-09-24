@@ -12,7 +12,7 @@
 //   - root CA (RSA-2048), self-signed
 //   - issuer CA (RSA-2048), intermediate signed by the root
 //   - signer leaf (ECDSA P-256) with critical KeyUsage ContentCommitment,
-//     as the interop contract with the Estonian e-voting collector
+//     as the interop contract with the reference implementation
 //     (the library's interop target; see the README) requires — its
 //     signer-certificate verification rejects certs without the bit
 //   - second signer leaf (ECDSA P-256, same template, same issuer), for
@@ -20,7 +20,7 @@
 //     must carry a distinct signer certificate
 //   - OCSP responder leaf (RSA-2048, issued by the issuer CA) with critical
 //     KU DigitalSignature and critical EKU OCSPSigning. RSA because
-//     the collector's OCSP verification accepts only the
+//     the reference implementation's OCSP verification accepts only the
 //     SHA-256/384/512-with-RSA response-signature variants
 //   - TSA leaf (ECDSA P-256, issued by the root — like the fixture TSA cert
 //     "DEMO of SK TSA 2014") with critical KU DigitalSignature|NonRepudiation
@@ -29,7 +29,7 @@
 // OCSP responses (RFC 6960) and time-stamp tokens (RFC 3161/CMS) are built
 // with stdlib ASN.1. Produced times are always injected by the caller:
 // OCSPResponse(producedAt) and TimeStampToken(data, TSTOptions{GenTime}).
-// For a TS-profile container the collector's time-window check
+// For a TS-profile container the reference implementation's time-window check
 // (ADR 0003) requires
 //
 //	genTime <= producedAt <= genTime+TSDelayTime
@@ -80,7 +80,7 @@ var (
 	oidCRLDistribution = asn1.ObjectIdentifier{2, 5, 29, 31}
 )
 
-// Placeholder AIA/CRL URLs. The collector never fetches them (offline
+// Placeholder AIA/CRL URLs. The reference implementation never fetches them (offline
 // verification only); they exist so the generated certs look like the SK
 // test certs.
 const (
@@ -100,6 +100,10 @@ type Options struct {
 	// Now.Add(-24*time.Hour) and Now.Add(defaultValidity).
 	NotBefore time.Time
 	NotAfter  time.Time
+
+	// AIAOCSPURL overrides the signer certificate's AIA OCSP responder
+	// URL (default: the placeholder aiaOCSPURL).
+	AIAOCSPURL string
 }
 
 // Cert pairs a certificate with its key and both encodings.
@@ -130,9 +134,10 @@ type certTemplate struct {
 	keyUsage x509.KeyUsage
 	extraEKU []asn1.ObjectIdentifier // non-standard EKU OIDs (none used)
 	isCA     bool
-	hasAIA   bool // signer: OCSP + caIssuers access descriptors
-	noCheck  bool // responder: id-ad-ocsp-nocheck extension
-	hasCRLDP bool // TSA: CRL distribution point
+	hasAIA   bool   // signer: OCSP + caIssuers access descriptors
+	aiaURL   string // signer: AIA OCSP URL override (empty = the placeholder)
+	noCheck  bool   // responder: id-ad-ocsp-nocheck extension
+	hasCRLDP bool   // TSA: CRL distribution point
 }
 
 // NewPKI generates a fresh test PKI per Options. All times are taken from
@@ -236,10 +241,13 @@ func NewPKI(opts Options) (*PKI, error) {
 	}
 
 	signer, err := newCert(&certTemplate{
-		subject:  signerName,
-		serial:   serialSigner,
-		keyUsage: x509.KeyUsageContentCommitment, // required by the collector; the fixture signer carries exactly this bit (critical)
+		subject: signerName,
+		serial:  serialSigner,
+		// ContentCommitment is the KU bit the interop contract requires
+		// on the signer certificate (critical).
+		keyUsage: x509.KeyUsageContentCommitment,
 		hasAIA:   true,
+		aiaURL:   opts.AIAOCSPURL,
 	}, notBefore, notAfter, issuer.Certificate, issuerKey, signerKey)
 	if err != nil {
 		return nil, fmt.Errorf("signer: %w", err)
@@ -250,6 +258,7 @@ func NewPKI(opts Options) (*PKI, error) {
 		serial:   serialSigner2,
 		keyUsage: x509.KeyUsageContentCommitment, // same template as the signer leaf
 		hasAIA:   true,
+		aiaURL:   opts.AIAOCSPURL,
 	}, notBefore, notAfter, issuer.Certificate, issuerKey, signer2Key)
 	if err != nil {
 		return nil, fmt.Errorf("signer2: %w", err)
@@ -299,9 +308,13 @@ func buildCertTemplate(role *certTemplate, notBefore, notAfter time.Time, pub cr
 		tmpl.UnknownExtKeyUsage = role.extraEKU
 	}
 	if role.hasAIA {
-		// The collector never fetches these URLs (offline verification);
-		// the fixture signer carries the same two descriptors.
-		tmpl.OCSPServer = []string{aiaOCSPURL}
+		// Offline verification never fetches these URLs; the descriptor
+		// is the AIA the ocsp fetch subcommand resolves by default.
+		url := role.aiaURL
+		if url == "" {
+			url = aiaOCSPURL
+		}
+		tmpl.OCSPServer = []string{url}
 		tmpl.IssuingCertificateURL = []string{aiaCAIssuersURL}
 	}
 	if role.hasCRLDP {

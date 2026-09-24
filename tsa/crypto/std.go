@@ -63,7 +63,7 @@ func NewStdSignatureVerifierModule() SignatureVerifierModule {
 
 // signatureAlgorithms maps the CMS signature algorithm OIDs the
 // standard implementation supports: the RSA and ECDSA families, the
-// set the Estonian e-voting collector's TSP client accepts.
+// set the reference implementation's TSP client accepts.
 var signatureAlgorithms = map[string]x509.SignatureAlgorithm{
 	"1.2.840.113549.1.1.11": x509.SHA256WithRSA,
 	"1.2.840.113549.1.1.12": x509.SHA384WithRSA,

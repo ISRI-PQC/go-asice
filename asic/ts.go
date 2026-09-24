@@ -8,7 +8,7 @@
 // a TST-producing callback: the TST's message imprint covers the C14N 1.1
 // bytes of the document's ds:SignatureValue element, and those bytes only
 // exist once the document is signed — so the token cannot be supplied up
-// front. The Estonian e-voting collector's offline TST check (the
+// front. The reference implementation's offline TST check (the
 // timestamp-verification data path)
 // verifies exactly that imprint.
 package asic
@@ -31,11 +31,11 @@ type TSData struct {
 	// TimeStamp produces an RFC 3161 TST over the given data. SignTS
 	// calls it exactly once, with the C14N 1.1 canonical bytes of the
 	// document's ds:SignatureValue element — the exact bytes
-	// the collector's timestamp check digests when verifying the token.
+	// the reference implementation's timestamp check digests when verifying the token.
 	TimeStamp func(data []byte) ([]byte, error)
 
 	// OCSPResponse is the DER basic OCSP response for the signer
-	// certificate. The collector checks it offline against the OCSP
+	// certificate. The reference implementation checks it offline against the OCSP
 	// responder certificates in the trust YAML (ocsp responders), and
 	// requires
 	// producedAt within 1 minute of the declared SigningTime.
@@ -53,7 +53,7 @@ type TSData struct {
 // certificate is cert. All time values come from signingTime (no wall
 // clock) — the single-time-T pattern (ADR 0001 §6): SigningTime, the
 // OCSP producedAt, and the TST genTime must all be one time so that
-// the collector's TS windows (OCSP maxAge 1 min, TSP maxAge 1 min,
+// the reference implementation's TS windows (OCSP maxAge 1 min, TSP maxAge 1 min,
 // TSDelayTime) are satisfied.
 //
 // The flow (PLAN.md Task 7): build and sign the S{k} document (BES form:
@@ -102,7 +102,7 @@ func SignTS(k int, sm xcrypto.XMLSignatureSignerModule, dm xcrypto.XMLDigestModu
 	}
 
 	// Canonicalize the in-tree ds:SignatureValue — the exact bytes
-	// the collector's timestamp check digests (inclusive C14N 1.1 in
+	// the reference implementation's timestamp check digests (inclusive C14N 1.1 in
 	// the document
 	// namespace context — the same bytes canonicalizeElement produces;
 	// ADR 0001 §2).

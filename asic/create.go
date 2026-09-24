@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"crypto"
 	"crypto/x509"
+	"encoding/asn1"
 	"encoding/pem"
 	"errors"
 	"fmt"
@@ -18,6 +19,7 @@ import (
 	"time"
 
 	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
+	"github.com/isri-pqc/go-asice/tsa"
 	xcrypto "github.com/isri-pqc/go-xmlsig/crypto"
 )
 
@@ -48,6 +50,14 @@ type CreateOptions struct {
 
 	// Profile selects the signature profile; zero is BES.
 	Profile Profile
+
+	// TSDelay is the explicit TSDelayTime bound of the create-time
+	// guard (TS profile): 0 <= OCSP producedAt - TST genTime <= TSDelay.
+	// Zero means resolve it from the fetched TST's TSA policy (the
+	// policy-parameter extension, tsa.TSDelayFromTSTInfo); neither
+	// source -> an actionable error. The guard applies the same
+	// predicate verify applies (predict verify, fail early).
+	TSDelay time.Duration
 
 	// SigningTime is the xades:SigningTime of every signature. It must
 	// be non-zero: Create performs no wall-clock reads.
@@ -112,11 +122,21 @@ func Create(w io.Writer, opts CreateOptions) error {
 		)
 		switch opts.Profile {
 		case ProfileTS:
+			// Capture the TST the renderer fetched: the create-time
+			// TSDelayTime guard compares its genTime against the stored
+			// OCSP producedAt (the same predicate verify applies).
+			stamp, captured := captureTimeStamp(opts.TimeStamp)
 			sig, err = SignTS(i, s.SignerModule, opts.DigestModule, s.Certificate, opts.Docs, opts.SigningTime, TSData{
-				TimeStamp:    opts.TimeStamp,
+				TimeStamp:    stamp,
 				OCSPResponse: opts.OCSPResponse,
 				Certificates: opts.TSCertificates,
 			})
+			if err != nil {
+				return fmt.Errorf("asic: sign S%d: %w", i, err)
+			}
+			if err := checkCreateTSDelay(i, opts.TSDelay, opts.OCSPResponse, *captured); err != nil {
+				return err
+			}
 		default:
 			sig, err = SignBES(i, s.SignerModule, opts.DigestModule, s.Certificate, opts.Docs, opts.SigningTime)
 		}
@@ -126,6 +146,75 @@ func Create(w io.Writer, opts CreateOptions) error {
 		sigs = append(sigs, sig)
 	}
 	return WriteContainer(w, opts.Docs, sigs...)
+}
+
+// captureTimeStamp wraps a TimeStamp provider and records the token it
+// returns (the create-time TSDelayTime guard needs the TST's genTime and
+// policy bound without re-deriving them).
+func captureTimeStamp(fn func(data []byte) ([]byte, error)) (func(data []byte) ([]byte, error), *[]byte) {
+	captured := new([]byte)
+	wrapped := func(data []byte) ([]byte, error) {
+		tok, err := fn(data)
+		if err == nil {
+			*captured = tok
+		}
+		return tok, err
+	}
+	return wrapped, captured
+}
+
+// checkCreateTSDelay is the create-time TSDelayTime guard: the same
+// predicate verify applies (tsDelayOK) — the stored OCSP producedAt must
+// lie in [genTime, genTime + bound]. The bound is explicit when set,
+// else the value the TST's TSA policy carries. Failures carry a stable,
+// greppable message containing the TSDelayTime token (plus both
+// timestamps and the bound); the container is not written.
+func checkCreateTSDelay(signer int, explicit time.Duration, ocspDER, tokenDER []byte) error {
+	producedAt, err := ocspProducedAt(ocspDER)
+	if err != nil {
+		return fmt.Errorf("asic: sign S%d: stored OCSP producedAt: %v", signer, err)
+	}
+	tok, err := tsa.Parse(tokenDER)
+	if err != nil {
+		return fmt.Errorf("asic: sign S%d: TST: %v", signer, err)
+	}
+	info := tok.Content.EncapContentInfo.TSTInfo
+	bound := explicit
+	if bound <= 0 {
+		if b, ok := tsa.TSDelayFromTSTInfo(info); ok {
+			bound = b
+		} else {
+			return fmt.Errorf("asic: sign S%d: no TSDelayTime bound: pass --tsdelay or use a TST whose TSA policy carries the bound", signer)
+		}
+	}
+	if !tsDelayOK(producedAt, info.GenTime, bound) {
+		return fmt.Errorf("asic: sign S%d: OCSP producedAt %s and TST genTime %s differ by %s, the TSDelayTime bound is %s",
+			signer, producedAt.UTC().Format(time.RFC3339), info.GenTime.UTC().Format(time.RFC3339),
+			producedAt.Sub(info.GenTime), bound)
+	}
+	return nil
+}
+
+// ocspProducedAt decodes the stored (offline) OCSP response and returns
+// its producedAt (the same decode the verify-time checkOCSPResponse
+// performs; the create-time guard needs the timestamp only).
+func ocspProducedAt(ocspDER []byte) (time.Time, error) {
+	var outer ocspOuter
+	rest, err := asn1.Unmarshal(ocspDER, &outer)
+	if err != nil || len(rest) > 0 {
+		return time.Time{}, fmt.Errorf("decode OCSP response: %v", err)
+	}
+	if int(outer.ResponseStatus) != 0 {
+		return time.Time{}, fmt.Errorf("OCSP response status is %d, want successful(0)", int(outer.ResponseStatus))
+	}
+	if !outer.ResponseBytes.ResponseType.Equal(oidOCSPBasic) {
+		return time.Time{}, fmt.Errorf("OCSP response type is %s, want id-pkix-OCSP (%s)", outer.ResponseBytes.ResponseType, oidOCSPBasic)
+	}
+	var basic ocspBasic
+	if rest, err = asn1.Unmarshal(outer.ResponseBytes.Response, &basic); err != nil || len(rest) > 0 {
+		return time.Time{}, fmt.Errorf("decode OCSP basic response: %v", err)
+	}
+	return basic.TBSResponseData.ProducedAt, nil
 }
 
 // ParseSigner reads a signer file: PEM blocks containing exactly one

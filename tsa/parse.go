@@ -7,6 +7,7 @@ import (
 	"encoding/asn1"
 	"fmt"
 	"math/big"
+	"time"
 )
 
 // Parse decodes a DER-encoded TimeStampToken (ContentInfo) and returns
@@ -17,7 +18,7 @@ import (
 //
 // Parse performs no trust, freshness, or signature validation — that is
 // Validator.Check's job. It does enforce the structural invariants
-// the Estonian e-voting collector enforces: the token content type
+// the reference implementation enforces: the token content type
 // must be id-signedData and the EncapsulatedContentInfo content type
 // must be id-ct-TSTInfo.
 func Parse(der []byte) (*TSToken, error) {
@@ -120,7 +121,7 @@ func Parse(der []byte) (*TSToken, error) {
 // Certificates that matches SignerInfo's identifier — issuer + serial
 // for version 1, subject key identifier for version 3 — from among
 // signers. The configured pool identifies the certificate (the model
-// the Estonian e-voting collector's TST validation uses): the token
+// the reference implementation's TST validation uses): the token
 // must include exactly that certificate.
 func findSignerCert(info SignerInfo, signers []*x509.Certificate) (*x509.Certificate, error) {
 	switch info.Version {
@@ -153,7 +154,7 @@ func findSignerCert(info SignerInfo, signers []*x509.Certificate) (*x509.Certifi
 
 // certHasIssuerSerial reports whether cert was issued by issuer with
 // the given serial. Extra names are included in the comparison (the
-// Estonian e-voting collector sets Issuer.ExtraNames = Issuer.Names
+// reference implementation sets Issuer.ExtraNames = Issuer.Names
 // before comparing RDN sequences). The comparison is on the DER
 // encoding of both RDN sequences.
 func certHasIssuerSerial(c *x509.Certificate, issuer pkix.RDNSequence, serial *big.Int) bool {
@@ -176,6 +177,37 @@ func equalBytes(a, b []byte) bool {
 		}
 	}
 	return true
+}
+
+// TSDelayFromToken extracts the TSDelayTime bound (as a duration of whole
+// seconds) that the TST's TSA policy carries, when present. The
+// convention: a TSTInfo extension whose extnOID equals the TSTInfo policy
+// OID and whose extnValue is a DER INTEGER of seconds — the policy
+// parameter carried by the token itself. The second return value is false
+// when the token carries no such bound (callers then fall back to an
+// explicit bound, or fail).
+func TSDelayFromToken(der []byte) (time.Duration, bool) {
+	tok, err := Parse(der)
+	if err != nil {
+		return 0, false
+	}
+	return TSDelayFromTSTInfo(tok.Content.EncapContentInfo.TSTInfo)
+}
+
+// TSDelayFromTSTInfo is TSDelayFromToken over an already-parsed TSTInfo.
+func TSDelayFromTSTInfo(info *TSTInfo) (time.Duration, bool) {
+	if info == nil {
+		return 0, false
+	}
+	for _, e := range info.Extensions {
+		if e.Id.Equal(info.Policy) {
+			var secs int
+			if _, err := asn1.Unmarshal(e.Value, &secs); err == nil && secs >= 0 {
+				return time.Duration(secs) * time.Second, true
+			}
+		}
+	}
+	return 0, false
 }
 
 // stripOuterTLV removes the outer SEQUENCE/[0] tag+length header from a

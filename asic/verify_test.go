@@ -17,6 +17,7 @@ import (
 	"crypto/rsa"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/binary"
 	"encoding/pem"
 	"hash/crc32"
@@ -350,6 +351,10 @@ func (h *verifyHarness) tsOpts() VerifyOptions {
 	o.IntermediatesPEM = h.pki.Issuer.PEM
 	o.OCSPRespondersPEM = h.pki.OCSPResponder.PEM
 	o.TSTVerifier = asiccrypto.NewStdTSTVerifierModule(h.tstSigners, h.intermediates)
+	// The hermetic TSTs carry no TSDelayTime policy parameter, so the
+	// harness pins an explicit 60 s bound (the policy-source tests use
+	// TSTs with the extension).
+	o.TSDelayTime = 60 * time.Second
 	return o
 }
 
@@ -448,16 +453,16 @@ func TestVerifyTSOCSPBeforeGenTime(t *testing.T) {
 
 // TestVerifyTSTSDelayTimeConfigurable: the TSDelayTime bound is a trust
 // parameter, overridable via VerifyOptions.TSDelayTime. An OCSP producedAt
-// 90 s after the TST genTime is outside the default 60 s bound but inside a
-// 2-minute bound, so the same container FAILS by default and PASSES with
-// TSDelayTime set to 2 minutes.
+// 90 s after the TST genTime is outside the 60 s bound but inside a
+// 2-minute bound, so the same container FAILS with the 60 s bound and
+// PASSES with TSDelayTime set to 2 minutes.
 func TestVerifyTSTSDelayTimeConfigurable(t *testing.T) {
 	h := newVerifyHarness(t)
 	// genTime (TST) = verifyT, producedAt (OCSP) = verifyT + 90 s.
 	ts := h.tsData(t, nil, verifyT, verifyT.Add(90*time.Second))
 	data := h.signTSContainer(t, ts)
 
-	// Default bound (60 s) rejects the 90 s gap.
+	// The explicit 60 s bound (h.tsOpts) rejects the 90 s gap.
 	expectFail(t, h.path(t, data), h.tsOpts(), "the TSDelayTime bound is")
 
 	// A 2-minute TSDelayTime accepts it.
@@ -470,6 +475,80 @@ func TestVerifyTSTSDelayTimeConfigurable(t *testing.T) {
 	if !rep.OK {
 		t.Fatalf("expected PASS with TSDelayTime=2min, got FAIL: %v / %v", rep.Errors, sigErrors(rep))
 	}
+}
+
+// tstPolicyBound returns a TSTInfo extension carrying the TSDelayTime
+// bound (the policy-parameter convention: extnOID == the TST policy OID,
+// the value a DER INTEGER of seconds).
+func tstPolicyBound(policy asn1.ObjectIdentifier, secs int) pkix.Extension {
+	v, err := asn1.Marshal(secs)
+	if err != nil {
+		panic(err)
+	}
+	return pkix.Extension{Id: policy, Value: v}
+}
+
+// tsDataWithTSTPolicy is tsData with a TST that carries the TSDelayTime
+// policy parameter (harness default policy OID, secs bound).
+func (h *verifyHarness) tsDataWithTSTPolicy(t *testing.T, genTime, ocspTime time.Time, secs int) TSData {
+	t.Helper()
+	ocsp, err := h.pki.OCSPResponse(ocspTime)
+	if err != nil {
+		t.Fatal(err)
+	}
+	policy := asn1.ObjectIdentifier{0, 4, 0, 2023, 1, 1}
+	return TSData{
+		TimeStamp: func(d []byte) ([]byte, error) {
+			return h.pki.TimeStampToken(d, testutil.TSTOptions{
+				GenTime:    genTime,
+				Policy:     policy,
+				Extensions: []pkix.Extension{tstPolicyBound(policy, secs)},
+			})
+		},
+		OCSPResponse: ocsp,
+		Certificates: []*x509.Certificate{h.pki.OCSPResponder.Certificate, h.pki.Issuer.Certificate},
+	}
+}
+
+// TestVerifyTSTSDelayTimeFromTSTPolicy: with no explicit bound, the
+// TSDelayTime bound comes from the TST's TSA policy (the policy
+// parameter extension). A 90 s gap FAILS with a 60 s policy bound and
+// PASSES with a 120 s one; an explicit bound wins over the policy.
+func TestVerifyTSTSDelayTimeFromTSTPolicy(t *testing.T) {
+	h := newVerifyHarness(t)
+	// genTime (TST) = verifyT, producedAt (OCSP) = verifyT + 90 s.
+	data := h.signTSContainer(t, h.tsDataWithTSTPolicy(t, verifyT, verifyT.Add(90*time.Second), 60))
+
+	// No explicit bound: the 60 s policy bound rejects the 90 s gap.
+	noExplicit := h.tsOpts()
+	noExplicit.TSDelayTime = 0
+	expectFail(t, h.path(t, data), noExplicit, "the TSDelayTime bound is")
+
+	// The 120 s policy bound accepts the same container.
+	data120 := h.signTSContainer(t, h.tsDataWithTSTPolicy(t, verifyT, verifyT.Add(90*time.Second), 120))
+	rep, err := Verify(h.path(t, data120), noExplicit)
+	if err != nil {
+		t.Fatalf("Verify: %v", err)
+	}
+	if !rep.OK {
+		t.Fatalf("expected PASS with the 120 s policy bound, got FAIL: %v / %v", rep.Errors, sigErrors(rep))
+	}
+
+	// An explicit bound wins over the policy: 60 s explicit rejects the
+	// 120 s policy container.
+	explicit := h.tsOpts() // 60 s explicit
+	expectFail(t, h.path(t, data120), explicit, "the TSDelayTime bound is")
+}
+
+// TestVerifyTSTSDelayTimeUnresolvable: no explicit bound and a TST
+// without the policy parameter -> the check fails with the actionable
+// no-bound error (the container is rejected, not silently accepted).
+func TestVerifyTSTSDelayTimeUnresolvable(t *testing.T) {
+	h := newVerifyHarness(t)
+	ts := h.tsData(t, nil, verifyT, verifyT)
+	noExplicit := h.tsOpts()
+	noExplicit.TSDelayTime = 0
+	expectFail(t, h.path(t, h.signTSContainer(t, ts)), noExplicit, "no TSDelayTime bound")
 }
 
 // TestVerifyTSOCSPMaxAgeConfigurable: the stored-OCSP maxAge bound
@@ -585,6 +664,8 @@ func TestVerifyTSOCSPRFC6960IssuerKeyHash(t *testing.T) {
 	o.IntermediatesPEM = p.Issuer.PEM
 	o.OCSPRespondersPEM = p.Issuer.PEM // the issuer CA is the configured responder
 	o.TSTVerifier = asiccrypto.NewStdTSTVerifierModule(tstSigners, intermediates)
+	// The hermetic TST carries no TSDelayTime policy parameter.
+	o.TSDelayTime = 60 * time.Second
 
 	rep, err := Verify(path, o)
 	if err != nil {

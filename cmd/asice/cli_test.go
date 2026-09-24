@@ -256,3 +256,22 @@ func TestRunCreateValidation(t *testing.T) {
 		})
 	}
 }
+
+// TestTSDelayFlagPins the --tsdelay flag on both create and verify (the
+// explicit TSDelayTime bound source; the policy source is covered by the
+// asic tests).
+func TestTSDelayFlag(t *testing.T) {
+	for _, sub := range []string{"create", "verify"} {
+		code, out, _ := runExecuteChecked(t, []string{sub, "--help"})
+		if code != exitOK {
+			t.Fatalf("%s --help: exit %d, want 0", sub, code)
+		}
+		if !strings.Contains(out, "--tsdelay") {
+			t.Errorf("%s --help lacks --tsdelay:\n%s", sub, out)
+		}
+	}
+	code, _, serr := runExecuteChecked(t, []string{"verify", "x.asice", "--tsdelay", "not-a-duration"})
+	if code != exitUsageErr {
+		t.Errorf("bad --tsdelay: exit %d, want %d (stderr: %s)", code, exitUsageErr, serr)
+	}
+}

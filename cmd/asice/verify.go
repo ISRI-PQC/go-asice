@@ -24,6 +24,7 @@ type verifyInput struct {
 	tstSigners     string
 	ocspResponders string
 	profile        string
+	tsDelay        time.Duration
 }
 
 // runVerifyCmd validates verifyInput, runs asic.Verify, and prints
@@ -92,6 +93,7 @@ func runVerifyCmd(stdout io.Writer, in verifyInput) error {
 		RootsPEM:          rootsPEM,
 		IntermediatesPEM:  interPEM,
 		OCSPRespondersPEM: ocspRespondersPEM,
+		TSDelayTime:       in.tsDelay,
 		DigestModule:      xcrypto.NewStdXMLDigestModule(),
 		VerifierModule:    asiccrypto.NewStdVerifierModule(),
 		ChainModule:       asiccrypto.NewStdCertificateChainModule(),

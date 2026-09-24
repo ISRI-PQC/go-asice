@@ -10,7 +10,7 @@
 // fixed-width big-endian — W3C XML Signature 1.1 section 6.4.3,
 // RFC 4050 section 3.3); the digest contract is encoding-agnostic
 // and reuses the xmlsig standard digest module. This package also defines the remaining asic-domain
-// operations: BDOC certificate chain verification (the collector's
+// operations: BDOC certificate chain verification (the reference implementation's
 // certificate-check semantics), embedded OCSP response verification,
 // and RFC 3161 TST verification.
 //
@@ -27,7 +27,7 @@ import (
 )
 
 // CertificateChainModule verifies a BDOC signer certificate the way
-// the Estonian e-voting collector's certificate check does: the leaf
+// the reference implementation's certificate check does: the leaf
 // requires the ContentCommitment key-usage bit, SHA-1-signed leaves
 // are rejected,
 // and the chain builds edge by edge from the signer to a supplied

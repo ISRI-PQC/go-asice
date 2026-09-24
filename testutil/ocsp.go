@@ -18,9 +18,8 @@ var (
 	// idPKIXOCSPBasic is the BasicOCSPResponse content type (RFC 6960 4.2.1).
 	idPKIXOCSPBasic = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 1}
 
-	// oidSHA1 is the CertID hash algorithm: the CertID the Estonian
-	// e-voting collector builds for OCSP requests hashes the issuer name
-	// with SHA-1 and fills IssuerKeyHash from AuthorityKeyId.
+	// oidSHA1 is the CertID hash algorithm of RFC 6960 section 4.1.1
+	// (the issuer name/key hashes are SHA-1).
 	oidSHA1 = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}
 
 	oidSHA256WithRSA = asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 1, 11}
@@ -28,8 +27,8 @@ var (
 
 var asn1Null = asn1.RawValue{Tag: 5}
 
-// The response structures mirror the OCSP response shapes the Estonian
-// e-voting collector unmarshals: same field order, tags and optionals,
+// The response structures mirror the OCSP response shapes the
+// reference implementation unmarshals: same field order, tags and optionals,
 // so the external acceptance harness parses our responses unchanged.
 type ocspCertID struct {
 	HashAlgorithm  pkix.AlgorithmIdentifier
@@ -82,29 +81,41 @@ type responseBytes struct {
 	Response     []byte
 }
 
-// certIDForCert builds the CertID the way the Estonian e-voting
-// collector builds it: SHA-1 of the RawIssuer DER, the issuer key from
-// AuthorityKeyId, and the serial.
-// The cert must carry an AuthorityKeyId extension (ours do).
-func certIDForCert(cert *Cert) (ocspCertID, error) {
-	if len(cert.Certificate.AuthorityKeyId) == 0 {
-		return ocspCertID{}, fmt.Errorf("cert %q has no AuthorityKeyId", cert.Certificate.Subject.CommonName)
+// certIDForCert builds the RFC 6960 section 4.1.1 CertID of cert:
+// hashAlgorithm SHA-1, issuerNameHash = SHA-1 of the issuer name DER
+// (RawSubject contents), issuerKeyHash = SHA-1 of the issuer's SPKI key
+// value (the BIT STRING contents of the issuer's
+// RawSubjectPublicKeyInfo), serialNumber = the certificate serial. The
+// legacy SK/reference implementation convention (IssuerKeyHash from the certificate's
+// AuthorityKeyId) is kept only where that compat path is tested; when
+// the issuer's SKI is SHA-1(SPKI) the two coincide.
+func certIDForCert(cert *Cert, issuer *Cert) (ocspCertID, error) {
+	if issuer == nil {
+		return ocspCertID{}, fmt.Errorf("cert %q: issuer certificate is nil", cert.Certificate.Subject.CommonName)
+	}
+	var spki struct {
+		Algorithm asn1.RawValue
+		Key       asn1.BitString
+	}
+	if _, err := asn1.Unmarshal(issuer.Certificate.RawSubjectPublicKeyInfo, &spki); err != nil {
+		return ocspCertID{}, fmt.Errorf("cert %q: issuer SPKI: %w", cert.Certificate.Subject.CommonName, err)
 	}
 	nameHash := sha1.Sum(cert.Certificate.RawIssuer)
+	keyHash := sha1.Sum(spki.Key.Bytes)
 	return ocspCertID{
 		HashAlgorithm: pkix.AlgorithmIdentifier{
 			Algorithm:  oidSHA1,
 			Parameters: asn1Null,
 		},
 		IssuerNameHash: nameHash[:],
-		IssuerKeyHash:  cert.Certificate.AuthorityKeyId,
+		IssuerKeyHash:  keyHash[:],
 		SerialNumber:   cert.Certificate.SerialNumber,
 	}, nil
 }
 
 // OCSPResponse returns a DER-encoded RFC 6960 "successful" basic OCSP
 // response for the PKI's SIGNER cert with status "good", signed by the OCSP
-// responder (SHA-256-with-RSA — the collector's OCSP verification
+// responder (SHA-256-with-RSA — the reference implementation's OCSP verification
 // accepts only the RSA SHA-2/3/4 response-signature variants), with
 // producedAt == thisUpdate == the injected time.
 //
@@ -113,9 +124,9 @@ func certIDForCert(cert *Cert) (ocspCertID, error) {
 //   - ResponderID by name (explicit [1]),
 //   - no nextUpdate at the tbs or single level,
 //   - no response/single extensions (the fixture's nonce and archive-cutoff
-//     extensions are SK-specific and never checked by the collector),
+//     extensions are SK-specific and never checked by the reference implementation),
 //   - the responder certificate in the optional [0] certs field — the
-//     collector's issuer-fallback path finds and verifies the responder
+//     reference implementation's issuer-fallback path finds and verifies the responder
 //     from there.
 func (p *PKI) OCSPResponse(producedAt time.Time) ([]byte, error) {
 	return p.OCSPResponseWithTimes(producedAt, producedAt)
@@ -132,7 +143,7 @@ func (p *PKI) OCSPResponseWithTimes(producedAt, thisUpdate time.Time) ([]byte, e
 	producedAt = producedAt.UTC()
 	thisUpdate = thisUpdate.UTC()
 
-	certID, err := certIDForCert(p.Signer)
+	certID, err := certIDForCert(p.Signer, p.Issuer)
 	if err != nil {
 		return nil, err
 	}
@@ -184,9 +195,9 @@ func (p *PKI) OCSPResponseWithTimes(producedAt, thisUpdate time.Time) ([]byte, e
 }
 
 // OCSPStatus reports the parsed status of a "good" response produced at
-// wantProducedAt, with checks equivalent to the Estonian e-voting
-// collector's: successful status, exactly one singleResponse whose
-// certID equals the PKI signer's (the collector's CertID fields),
+// wantProducedAt, with checks equivalent to the reference
+// implementation's: successful status, exactly one singleResponse whose
+// certID equals the PKI signer's (the reference implementation's CertID fields),
 // responder name matching the PKI responder, signature over the
 // tbsResponseData verified with the PKI responder cert, and
 // producedAt == thisUpdate == wantProducedAt.
@@ -218,7 +229,7 @@ func (p *PKI) OCSPStatus(der []byte, wantProducedAt time.Time) (producedAt time.
 	if len(rd.Responses) != 1 {
 		return time.Time{}, fmt.Errorf("response has %d singleResponses, want 1", len(rd.Responses))
 	}
-	want, err := certIDForCert(p.Signer)
+	want, err := certIDForCert(p.Signer, p.Issuer)
 	if err != nil {
 		return time.Time{}, err
 	}
@@ -245,7 +256,7 @@ func (p *PKI) OCSPStatus(der []byte, wantProducedAt time.Time) (producedAt time.
 }
 
 // parseOCSPResponseForTest decodes der into the OCSP response structs
-// the Estonian e-voting collector unmarshals, so tests can inspect
+// the reference implementation unmarshals, so tests can inspect
 // individual fields.
 func parseOCSPResponseForTest(der []byte) (ocspResponseOuter, basicOCSPResponse, error) {
 	var outer ocspResponseOuter
@@ -268,8 +279,8 @@ func signDER(priv crypto.Signer, der []byte, hash crypto.Hash) ([]byte, error) {
 }
 
 // rdnEqual compares two RDN sequences attribute by attribute (same
-// order, type and value) — the match semantics the Estonian e-voting
-// collector needs for the responder name comparison.
+// order, type and value) — the match semantics the reference
+// implementation needs for the responder name comparison.
 func rdnEqual(a, b pkix.RDNSequence) bool {
 	if len(a) != len(b) {
 		return false

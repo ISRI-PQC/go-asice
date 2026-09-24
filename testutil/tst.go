@@ -24,7 +24,7 @@ var (
 
 	// defaultTSTPolicy is the policy OID of the SK test TSA — exactly
 	// 0.4.0.2023.1.1 as embedded in the testEIDTS.bdoc fixture. It is
-	// decorative: the collector's TST checks never compare the policy value.
+	// decorative: the reference implementation's TST checks never compare the policy value.
 	defaultTSTPolicy = asn1.ObjectIdentifier{0, 4, 0, 2023, 1, 1}
 )
 
@@ -34,7 +34,7 @@ var defaultTSTSerial = new(big.Int).SetBytes([]byte{81, 82, 83, 84, 85, 86, 87, 
 type TSTOptions struct {
 	// GenTime is REQUIRED and becomes both TSTInfo.genTime and the
 	// signingTime signed attribute — identical, like the fixture. The
-	// collector requires signingTime-genTime to fall in [0, tsp
+	// reference implementation requires signingTime-genTime to fall in [0, tsp
 	// DelayTime]; the trust YAMLs leave DelayTime at 0, so the two
 	// must be equal.
 	GenTime time.Time
@@ -43,17 +43,22 @@ type TSTOptions struct {
 	Serial *big.Int
 
 	// Nonce is included in TSTInfo only when non-nil. The fixture carries
-	// a 21-byte nonce; the collector checks the nonce only when the
+	// a 21-byte nonce; the reference implementation checks the nonce only when the
 	// caller supplies one, and the bdoc flow never does.
 	Nonce *big.Int
 
 	// Policy is the TSTInfo policy OID (default: defaultTSTPolicy).
 	Policy asn1.ObjectIdentifier
+
+	// Extensions are the TSTInfo extensions, emitted in order when
+	// non-empty (the TSTInfo policy parameters carry the TSDelayTime
+	// bound — see tsa.TSDelayFromToken).
+	Extensions []pkix.Extension
 }
 
 // tstInfo is RFC 3161 TimeStampToken's content type
 // (https://tools.ietf.org/html/rfc3161#section-2.4.2), the same shape
-// the collector unmarshals.
+// the reference implementation unmarshals.
 type tstInfo struct {
 	Version        int
 	Policy         asn1.ObjectIdentifier
@@ -77,7 +82,7 @@ type tstMessageImprint struct {
 	HashedMessage []byte
 }
 
-// CMS SignedData structures (RFC 5652), same shapes the collector
+// CMS SignedData structures (RFC 5652), same shapes the reference implementation
 // unmarshals.
 type timeStpToken struct {
 	ContentType asn1.ObjectIdentifier
@@ -134,8 +139,8 @@ type essCertIDv2 struct {
 // issuerSerial is the RFC 5755 IssuerSerial: a GeneralName
 // directoryName in [4] and the serial number. The GeneralName element
 // itself carries the [4] tag (0xa4); wrapping it in an extra SEQUENCE
-// produces a shape neither the fixture TST nor the Estonian e-voting
-// collector's parser accepts (it expects the GeneralName element to
+// produces a shape neither the fixture TST nor the reference
+// implementation's parser accepts (it expects the GeneralName element to
 // carry the explicit [4] tag with the directoryName RDN sequence).
 type issuerSerial struct {
 	Issuer       generalName
@@ -151,13 +156,13 @@ type generalName struct {
 // the TST embedded in testEIDTS.bdoc field by field:
 //
 //	ContentInfo { id-signedData, [0] SignedData }
-//	  SignedData version 3 (the Estonian e-voting
-//	                        collector enforces 3 — non id-data content
+//	  SignedData version 3 (the reference
+//	                        implementation enforces 3 — non id-data content
 //	                        type)
 //	    digestAlgorithms { sha256 }          (fixture: { sha512 }; the
-//	                                          collector ignores the content)
+//	                                          reference implementation ignores the content)
 //	    encapContentInfo id-ct-TSTInfo, [0] TSTInfo DER
-//	    certificates [0] { TSA cert }        (the collector requires the
+//	    certificates [0] { TSA cert }        (the reference implementation requires the
 //	                                          signer cert to be present)
 //	    signerInfos: one SignerInfo version 1 (issuer+serial of the TSA
 //	      cert); digestAlg sha256 (fixture: sha512); signed attrs in the
@@ -168,7 +173,7 @@ type generalName struct {
 //	        signingCert   -> v2 { essCertIDv2 { SHA-1(TSA cert),
 //	                        issuerSerial[4] { TSA issuer name, serial } } }
 //	      sigAlg ecdsa-with-SHA256 (fixture: sha512WithRSA; both are in
-//	      the collector's accepted signature-algorithm set)
+//	      the reference implementation's accepted signature-algorithm set)
 //	TSTInfo: version 1, policy defaultTSTPolicy (= the fixture's OID),
 //	  imprint sha256, serial (TSTOptions.Serial), genTime GenTime, nonce
 //	  only when given (the fixture has one), no accuracy/ordering/
@@ -200,6 +205,7 @@ func (p *PKI) TimeStampToken(data []byte, opts TSTOptions) ([]byte, error) {
 		SerialNumber: serial,
 		GenTime:      gentime,
 		Nonce:        opts.Nonce,
+		Extensions:   opts.Extensions,
 	}
 	infoDER, err := asn1.Marshal(info)
 	if err != nil {
@@ -238,7 +244,7 @@ func (p *PKI) TimeStampToken(data []byte, opts TSTOptions) ([]byte, error) {
 
 	// Sign over the signed attrs: CMS encodes them as SET OF (tag 0x31);
 	// Go marshals the slice as SEQUENCE OF, so patch the tag exactly as
-	// the collector's TST signature check reconstructs it.
+	// the reference implementation's TST signature check reconstructs it.
 	attrsDER, err := asn1.Marshal(attrs)
 	if err != nil {
 		return nil, fmt.Errorf("marshal signed attrs: %w", err)
@@ -259,7 +265,7 @@ func (p *PKI) TimeStampToken(data []byte, opts TSTOptions) ([]byte, error) {
 		},
 		// FullBytes: the element IS the cert TLV (tag+length included);
 		// Tag:16+Bytes would add an extra SEQUENCE around it, which the
-		// collector's inclusion check (bytes.Equal(cert.Raw,
+		// reference implementation's inclusion check (bytes.Equal(cert.Raw,
 		// RawContent)) rejects — same fix as the OCSP Certs field
 		// (ocsp.go).
 		Certificates: []asn1.RawValue{{FullBytes: tsa.DER}},
@@ -281,8 +287,8 @@ func (p *PKI) TimeStampToken(data []byte, opts TSTOptions) ([]byte, error) {
 }
 
 // attrSetOf encodes value as one ASN.1 element and wraps it in a
-// one-element SET (the CMS attribute-value convention the Estonian
-// e-voting collector enforces: "the attribute value be a SET with a
+// one-element SET (the CMS attribute-value convention the reference
+// implementation enforces: "the attribute value be a SET with a
 // single entry").
 // attrSetOf encodes value as a one-element SET OF (tag 0x31): the CMS
 // attribute-value convention (RFC 5652), and exactly what the fixture's

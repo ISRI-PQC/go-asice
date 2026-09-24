@@ -16,7 +16,7 @@ import (
 // File is one signed data file: the flat name (ds:Reference URI inside
 // the container) and the DataObjectFormat media type (which must equal
 // the ODF manifest media type, as the interop contract with the
-// Estonian e-voting collector enforces).
+// reference implementation enforces).
 type File struct {
 	Name      string
 	MediaType string
@@ -29,7 +29,7 @@ type File struct {
 //	SigningCertificate (v1.3.2 Cert: CertDigest (DigestMethodSHA256
 //	through dm) of the KeyInfo certificate DER + IssuerSerial with RFC
 //	4514 issuer name and decimal serial). SignaturePolicyIdentifier is
-//	absent (the Estonian e-voting collector rejects it in the BES/TS
+//	absent (the reference implementation rejects it in the BES/TS
 //	profiles), and so are the optional
 //	SignatureProductionPlace/SignerRole (allowed empty, unused).
 //

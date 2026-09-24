@@ -95,7 +95,7 @@ Exit codes: 0 ok; 1 create/verify failure; 2 usage error.`,
 	root.SetFlagErrorFunc(func(cmd *cobra.Command, err error) error {
 		return &usageErr{msg: err.Error()}
 	})
-	root.AddCommand(newCreateCommand(), newVerifyCommand())
+	root.AddCommand(newCreateCommand(), newVerifyCommand(), newOCSPCommand())
 	return root
 }
 
@@ -148,6 +148,7 @@ Flags may be placed before or after the document paths.`,
 	cmd.Flags().StringVar(&in.ocspFile, "ocsp-file", "", "ts profile: DER basic OCSP response for the signer")
 	cmd.Flags().StringVar(&in.tstURL, "tst", "", "ts profile: RFC 3161 TSA endpoint URL")
 	cmd.Flags().StringVar(&in.tstSigners, "tst-signers", "", "ts profile: PEM with the TSA signing certificate(s)")
+	cmd.Flags().DurationVar(&in.tsDelay, "tsdelay", 0, "ts profile: explicit TSDelayTime bound (0 <= OCSP producedAt - TST genTime <= tsdelay); when omitted, the bound is taken from the TST's TSA policy")
 	cmd.Flags().StringVar(&signingTime, "signing-time", "", "RFC 3339 signing time (default: now, UTC)")
 	return cmd
 }
@@ -191,5 +192,6 @@ example:
 	cmd.Flags().StringVar(&in.tstSigners, "tst-signers", "", "ts profile: PEM with the TSA signing certificate(s) (required)")
 	cmd.Flags().StringVar(&in.ocspResponders, "ocsp-responders", "", "ts profile: PEM with the configured OCSP responder certificate(s)")
 	cmd.Flags().StringVar(&in.profile, "profile", "bes", "verification profile: bes or ts")
+	cmd.Flags().DurationVar(&in.tsDelay, "tsdelay", 0, "ts profile: explicit TSDelayTime bound (0 <= OCSP producedAt - TST genTime <= tsdelay); when omitted, the bound is taken from the TST's TSA policy")
 	return cmd
 }

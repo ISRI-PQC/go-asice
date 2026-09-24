@@ -16,7 +16,7 @@ import (
 )
 
 // The Akamu PKI models a NON-SK certificate hierarchy — the shape that
-// breaks the collector's certID check. Its issuer CA's SubjectKeyId is
+// breaks the reference implementation's certID check. Its issuer CA's SubjectKeyId is
 // NOT SHA-1 of its SPKI key value (it is SHA-256, 32 bytes), so the
 // signer leaf's AuthorityKeyId (32 bytes, copied from the issuer SKI)
 // differs from the RFC 6960 issuerKeyHash (SHA-1 of the issuer SPKI key
@@ -119,7 +119,7 @@ func NewAkamuPKI(opts Options) (*PKI, error) {
 	}
 
 	// signer leaf: ECDSA, critical KU ContentCommitment (required by the
-	// collector); its AuthorityKeyId is the issuer SKI (SHA-256, 32 bytes),
+	// reference implementation); its AuthorityKeyId is the issuer SKI (SHA-256, 32 bytes),
 	// copied automatically by x509.CreateCertificate.
 	signerTmpl := &x509.Certificate{
 		SerialNumber:          akamuSerialSigner,

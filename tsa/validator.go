@@ -14,7 +14,7 @@ import (
 )
 
 // Default freshness bounds (ADR 0001 section 5; the defaults of the
-// Estonian e-voting collector's TSP client): the maximum age of a
+// reference implementation's TSP client): the maximum age of a
 // genTime (now - genTime) and the maximum it may be set into the
 // future.
 const (
@@ -23,7 +23,7 @@ const (
 )
 
 // CMS signed-attribute OIDs (RFC 5652 section 11, RFC 5755) in string
-// form (the collector's lookups are string-keyed too).
+// form (the reference implementation's lookups are string-keyed too).
 const (
 	oidAttrContentType   = "1.2.840.113549.1.9.3"
 	oidAttrMessageDigest = "1.2.840.113549.1.9.4"
@@ -32,12 +32,12 @@ const (
 	oidAttrSigningCertV2 = "1.2.840.113549.1.9.16.2.47"
 	// id-cms-algorithmProtection (RFC 6211), carried by the SK 2020
 	// TSTs (testMIDTS.bdoc): the protected digest/signature algorithms
-	// must match the SignerInfo's, as the collector enforces.
+	// must match the SignerInfo's, as the reference implementation enforces.
 	oidAttrAlgorithmProtection = "1.2.840.113549.1.9.52"
 )
 
 // Validator validates TimeStampTokens against a supplied data value.
-// Its checks mirror the TST validation the Estonian e-voting collector
+// Its checks mirror the TST validation the reference implementation
 // (the library's interop target; see the README "Verification"
 // section) applies: token structure, TSTInfo version, message imprint
 // over the supplied data, nonce, signed-attribute integrity, the CMS
@@ -45,7 +45,7 @@ const (
 // selected from the configured pool — plus, because this package is
 // go-asice's own TST check, a chain check of the signer against the
 // supplied roots and a KeyUsage/EKU time-stamping requirement (the
-// TSA-certificate checks the collector's container verification
+// TSA-certificate checks the reference implementation's container verification
 // applies).
 type Validator struct {
 	// Roots are the trusted root CAs the TSA certificate must chain
@@ -55,7 +55,7 @@ type Validator struct {
 	Intermediates []*x509.Certificate
 	// TSTSigners is the configured TSA-signing certificate pool; the
 	// SignerInfo identifies the signing certificate among these (the
-	// model the collector's TSP configuration uses). At least one is
+	// model the reference implementation's TSP configuration uses). At least one is
 	// required.
 	TSTSigners []*x509.Certificate
 
@@ -87,7 +87,7 @@ type CheckOptions struct {
 	Nonce *big.Int
 	// FreshnessCheck enables the genTime age/skew check against Now.
 	// Stored-token checks (a TST embedded long ago in a container,
-	// the collector's offline TST verification path) leave it false.
+	// the reference implementation's offline TST verification path) leave it false.
 	FreshnessCheck bool
 	// Now is the reference time for FreshnessCheck.
 	Now time.Time
@@ -124,13 +124,13 @@ func (v *Validator) Check(token, data []byte, opts CheckOptions) (time.Time, err
 	info := tsToken.Content.EncapContentInfo.TSTInfo
 
 	// TSTInfo version must be 1: the only version RFC 3161 defines
-	// (the collector enforces this too).
+	// (the reference implementation enforces this too).
 	if info.Version != 1 {
 		return time.Time{}, fmt.Errorf("tsa: TSTInfo version %d, want 1", info.Version)
 	}
 
 	// The message imprint must be a digest of the supplied data
-	// (relaxed from the exact request match the collector requires —
+	// (relaxed from the exact request match the reference implementation requires —
 	// but the imprint must equal the digest of data).
 	calculated, err := v.DigestModule.GetDigestFunc(info.MessageImprint.HashAlgorithm.Algorithm)(data)
 	if err != nil {
@@ -158,7 +158,7 @@ func (v *Validator) Check(token, data []byte, opts CheckOptions) (time.Time, err
 	}
 
 	// The token must be a single-Signer SignedData
-	// (the check the collector's TST validation applies) whose signer
+	// (the check the reference implementation's TST validation applies) whose signer
 	// is a configured certificate included in the token, with intact
 	// signed attributes and a valid CMS signature over them.
 	if err := v.checkSignedData(tsToken, info.GenTime); err != nil {
@@ -166,14 +166,14 @@ func (v *Validator) Check(token, data []byte, opts CheckOptions) (time.Time, err
 	}
 
 	// Chain + purpose checks on the signing certificate (the TSA
-	// checks the collector's container verification applies).
+	// checks the reference implementation's container verification applies).
 	if err := v.checkSignerChain(tsToken, info.GenTime); err != nil {
 		return time.Time{}, err
 	}
 	return info.GenTime, nil
 }
 
-// checkGenTime applies the genTime freshness check the collector's
+// checkGenTime applies the genTime freshness check the reference implementation's
 // TSP client applies: now - genTime + accuracy <= MaxAge and genTime
 // <= now + MaxSkew - accuracy.
 func checkGenTime(now, gen time.Time, acc Accuracy, maxAge, maxSkew time.Duration) error {
@@ -192,7 +192,7 @@ func checkGenTime(now, gen time.Time, acc Accuracy, maxAge, maxSkew time.Duratio
 	return nil
 }
 
-// checkSignedData mirrors the collector's SignedData validation:
+// checkSignedData mirrors the reference implementation's SignedData validation:
 // content type, version 3, exactly one SignerInfo, signer
 // identification from the configured pool, the signer certificate
 // included in the token, signed attributes and the CMS signature over
@@ -235,7 +235,7 @@ func (v *Validator) checkSignedData(tsToken *TSToken, gen time.Time) error {
 	return nil
 }
 
-// checkSignedAttributes mirrors the collector's signed-attribute
+// checkSignedAttributes mirrors the reference implementation's signed-attribute
 // validation: every attribute value must be a one-entry SET,
 // attributes must not duplicate and must be one of the known CMS
 // attributes, contentType/messageDigest/signingTime must be present
@@ -346,7 +346,7 @@ func checkAttrSigningTime(value []byte, gen time.Time) error {
 // checkAttrSigningCert verifies a signingCert (RFC 5652: SHA-1, no
 // algorithm) or signingCertificateV2 (RFC 5755: SHA-256 default or
 // explicit) attribute against the signer certificate, mirroring the
-// collector's signingCert validation.
+// reference implementation's signingCert validation.
 func (v *Validator) checkAttrSigningCert(value []byte, signer *x509.Certificate, v2 bool) error {
 	var sc signingCertificateV2
 	rest, err := asn1.Unmarshal(value, &sc)
@@ -469,7 +469,7 @@ func rawChildren(v asn1.RawValue) ([]asn1.RawValue, error) {
 	return out, nil
 }
 
-// checkSignature mirrors the collector's TST signature check: the
+// checkSignature mirrors the reference implementation's TST signature check: the
 // signature algorithm must be supported and paired with its digest,
 // and the signature must verify over the signed attributes re-encoded
 // as a SET OF (the CMS encoding).
@@ -508,7 +508,7 @@ func (v *Validator) checkSignature(sInfo SignerInfo, cert *x509.Certificate) err
 
 // checkSignerChain verifies the signing certificate against the
 // configured roots (at the TST genTime) through the chain module and
-// enforces the TSA purpose bits the Estonian e-voting collector's
+// enforces the TSA purpose bits the reference implementation's
 // container verification requires: KeyUsage digitalSignature and EKU
 // time-stamping (the purpose bits are checked by the standard module).
 func (v *Validator) checkSignerChain(tsToken *TSToken, gen time.Time) error {
@@ -521,7 +521,7 @@ func (v *Validator) checkSignerChain(tsToken *TSToken, gen time.Time) error {
 }
 
 // signingCertificateV2 is the signingCertificateV2 structure the
-// interop contract with the Estonian e-voting collector unmarshals;
+// interop contract with the reference implementation unmarshals;
 // the .12 and .47 signed attributes share it. Go's asn1 cannot decode
 // pointer fields, so plain value types are used directly and the
 // issuerSerial element is kept raw — the fixture TST uses the RFC 5755
@@ -547,7 +547,7 @@ type cmsAlgorithmProtection struct {
 	SignatureAlgorithm pkix.AlgorithmIdentifier `asn1:"tag:1"`
 }
 
-// checkAlgorithmProtection mirrors the collector's
+// checkAlgorithmProtection mirrors the reference implementation's
 // algorithm-protection check: the attribute value must decode cleanly
 // and its protected digest and signature algorithms must equal the
 // SignerInfo's own.
@@ -572,7 +572,7 @@ func checkAlgorithmProtection(value []byte, sInfo SignerInfo) error {
 }
 
 // algorithmIdentifierEqual compares two AlgorithmIdentifiers the way
-// the collector's algorithm-identifier comparison does: equal OIDs and
+// the reference implementation's algorithm-identifier comparison does: equal OIDs and
 // equal DER parameter encodings (absent parameters on both sides).
 func algorithmIdentifierEqual(a, b pkix.AlgorithmIdentifier) bool {
 	if !a.Algorithm.Equal(b.Algorithm) {

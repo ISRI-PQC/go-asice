@@ -1,5 +1,5 @@
 // Package asic builds ASiC-E containers (TS 102 918 §6.2, XML/XAdES form)
-// in the layout the Estonian e-voting collector accepts.
+// in the layout the reference implementation accepts.
 //
 // This file implements the ZIP container writer. Go's archive/zip is not
 // used to WRITE the container because it unconditionally sets general
@@ -34,7 +34,7 @@ const (
 	ManifestFile = "META-INF/manifest.xml"
 
 	// SignatureFilePrefix is the META-INF prefix for signature files
-	// (signatures0.xml, signatures1.xml, ...). The collector's parser
+	// (signatures0.xml, signatures1.xml, ...). The reference implementation's parser
 	// matches
 	// ^META-INF/[^/]*signatures[^/]*\.xml$ case-sensitively.
 	SignatureFilePrefix = "META-INF/signatures"

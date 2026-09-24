@@ -5,7 +5,7 @@
 // properties consistency, and — for the TS profile — the
 // xades:UnsignedProperties checks (checkTimestamp, checkOCSP,
 // TSDelayTime; ADR 0003). The check order mirrors the per-signature
-// sequence the Estonian e-voting collector's container verification
+// sequence the reference implementation's container verification
 // applies.
 
 package asic
@@ -24,6 +24,7 @@ import (
 
 	"github.com/beevik/etree"
 	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
+	"github.com/isri-pqc/go-asice/tsa"
 	"github.com/isri-pqc/go-asice/xades"
 	"github.com/isri-pqc/go-xmlsig/canonicalizers"
 	"github.com/isri-pqc/go-xmlsig/etreeutils"
@@ -166,7 +167,7 @@ func checkKeyInfoCert(ki *etree.Element, name string, fail func(string, ...any))
 
 // checkObject walks ds:Object → xades:QualifyingProperties →
 // xades:SignedProperties, enforcing the QualifyingProperties target
-// (the collector's target check) and returning the SP element.
+// (the reference implementation's target check) and returning the SP element.
 func checkObject(obj *etree.Element, target string, name string, fail func(string, ...any)) (*etree.Element, bool) {
 	qp := directElements(obj, xades.NSXAdES, "QualifyingProperties")
 	if len(qp) != 1 {
@@ -253,7 +254,7 @@ func checkSignatureValue(m *verifyModules, sv, si *etree.Element, cert *x509.Cer
 }
 
 // signatureMethods is the allowlist of ds:SignatureMethod algorithms
-// (the collector's accepted set: RSA and ECDSA with
+// (the reference implementation's accepted set: RSA and ECDSA with
 // SHA-256/384/512) — the interop contract, checked here; the
 // verification itself is the
 // verifier module's job (ADR 0004).
@@ -267,7 +268,7 @@ var signatureMethods = map[spec.XMLSignatureAlgorithmID]struct{}{
 }
 
 // checkReferences verifies every ds:Reference of the signature (the
-// collector's reference check): exactly one SignedProperties reference
+// reference check): exactly one SignedProperties reference
 // plus exactly
 // one file reference per container data file, unique Ids and URIs, and
 // matching SHA-256 digests — the file digests over the raw entry bytes,
@@ -405,7 +406,7 @@ func digestMatchesValue(value string, digest []byte) error {
 }
 
 // checkSignedProperties verifies the signed properties consistency
-// (the collector's SignedProperties check + the DataObjectFormat
+// (the reference implementation's SignedProperties check + the DataObjectFormat
 // cross-checks of checkReferences): the SigningCertificate must
 // describe the signer
 // certificate (CertDigest over the KeyInfo certificate DER, matching
@@ -610,7 +611,7 @@ func canonicalizeSignedInfoBytes(el *etree.Element) ([]byte, error) {
 }
 
 // decodeBase64 decodes a base64 value that may carry whitespace
-// (our renderer emits single-line base64; the collector strips
+// (our renderer emits single-line base64; the reference implementation strips
 // whitespace before decoding, so both layouts verify).
 func decodeBase64(s string) ([]byte, error) {
 	clean := strings.NewReplacer("\n", "", "\r", "", " ", "", "\t", "").Replace(s)
@@ -623,32 +624,49 @@ func decodeBase64(s string) ([]byte, error) {
 
 // --- TS profile checks (T8b, ADR 0003) ---
 
-// defaultTSDelayTime is the built-in default for VerifyOptions.TSDelayTime:
-// the collector's TSDelayTime (the trust YAML "tsdelaytime: 60"), the bound
-// of the TST genTime and OCSP producedAt difference (ADR 0003 section 2):
-// 0 <= producedAt - genTime <= TSDelayTime. It is a trust parameter; a
-// caller overrides it with VerifyOptions.TSDelayTime.
-const defaultTSDelayTime = 60 * time.Second
-
 // defaultOCSPThisUpdateMaxAge is the built-in default for
-// VerifyOptions.OCSPMaxAge: the collector's OCSP maxAge (1 minute) for the
-// STORED (offline) response path: the bound of producedAt - thisUpdate. The
+// VerifyOptions.OCSPMaxAge: the 1-minute maxAge of the STORED (offline)
+// response path: the bound of producedAt - thisUpdate. The
 // now-based skew/age checks apply to the LIVE path only and never run on
 // stored responses. It is a trust parameter; a caller overrides it with
 // VerifyOptions.OCSPMaxAge.
 const defaultOCSPThisUpdateMaxAge = 1 * time.Minute
+
+// tsDelayOK is the TSDelayTime predicate (ADR 0003 section 2): the stored
+// OCSP producedAt must lie in [genTime, genTime + bound] —
+// 0 <= producedAt - genTime <= bound. Both the verify-time check and the
+// create-time guard call it, so the two can never drift apart.
+func tsDelayOK(producedAt, genTime time.Time, bound time.Duration) bool {
+	diff := producedAt.Sub(genTime)
+	return diff >= 0 && diff <= bound
+}
+
+// tsDelayBound resolves the TSDelayTime bound for one signature: the
+// explicit bound when set, else the value the TST's TSA policy carries
+// (tsa.TSDelayFromToken). It returns false with an actionable error when
+// neither source provides one.
+func tsDelayBound(explicit time.Duration, tst []byte, name string, fail func(string, ...any)) (time.Duration, bool) {
+	if explicit > 0 {
+		return explicit, true
+	}
+	if bound, ok := tsa.TSDelayFromToken(tst); ok {
+		return bound, true
+	}
+	fail("%s: no TSDelayTime bound: pass --tsdelay or use a TST whose TSA policy carries the bound", name)
+	return 0, false
+}
 
 var (
 	// oidOCSPBasic is the id-pkix-OCSP BasicOCSPResponse content type
 	// (RFC 6960 section 4.2.1).
 	oidOCSPBasic = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 1}
 	// oidOCSPSHA1 is the SHA-1 digest OID — the CertID issuer name
-	// hash algorithm the collector's CertID construction uses.
+	// hash algorithm the reference implementation's CertID construction uses.
 	oidOCSPSHA1 = asn1.ObjectIdentifier{1, 3, 14, 3, 2, 26}
 )
 
 // ocspSignatureAlgorithms is the allowlist of OCSP response signature
-// algorithm OIDs the collector accepts (the RSA SHA-2/3/4 variants and
+// algorithm OIDs the reference implementation accepts (the RSA SHA-2/3/4 variants and
 // the ECDSA P-256/384/S390 variants — non-SK CAs such as Akamu sign
 // their OCSP responses with EC P-256) — the interop contract, checked
 // here; the verification itself is the OCSP module's job (ADR 0004).
@@ -656,19 +674,19 @@ var ocspSignatureAlgorithms = map[string]struct{}{
 	"1.2.840.113549.1.1.11": {},
 	"1.2.840.113549.1.1.12": {},
 	"1.2.840.113549.1.1.13": {},
-	"1.2.840.10045.4.3.2": {},
-	"1.2.840.10045.4.3.3": {},
-	"1.2.840.10045.4.3.4": {},
+	"1.2.840.10045.4.3.2":   {},
+	"1.2.840.10045.4.3.3":   {},
+	"1.2.840.10045.4.3.4":   {},
 }
 
 // checkTSProperties runs the TS profile checks of one signature
-// (the collector's TS-profile branch): the
+// (the reference implementation's TS-profile branch): the
 // xades:UnsignedProperties strict
 // shape, checkTimestamp (TST over the C14N 1.1 ds:SignatureValue
 // element), checkOCSP (the embedded OCSP response), and the TSDelayTime
 // bound. A failed check stops the checks that depend on it; on success
 // the report SigningTime is REPLACED with the TST genTime (the
-// collector's timestamp-check behavior).
+// reference implementation's timestamp-check behavior).
 func checkTSProperties(obj, sv *etree.Element, cert *x509.Certificate, declaredSigningTime time.Time, ts *tsContext, name string, report *SignatureReport, fail func(string, ...any)) {
 	tst, ocspDER, ok := checkUSPShape(obj, name, fail)
 	if !ok {
@@ -682,17 +700,22 @@ func checkTSProperties(obj, sv *etree.Element, cert *x509.Certificate, declaredS
 	if !ok {
 		return
 	}
-	// The caller's timestamp/OCSP time-mismatch bound (ADR 0003 section 2).
-	if diff := producedAt.Sub(genTime); diff < 0 || diff > ts.tsDelayTime {
+	// The TSDelayTime time-mismatch bound (ADR 0003 section 2), shared
+	// with the create-time guard via tsDelayOK.
+	bound, ok := tsDelayBound(ts.tsDelayTime, tst, name, fail)
+	if !ok {
+		return
+	}
+	if !tsDelayOK(producedAt, genTime, bound) {
 		fail("%s: OCSP producedAt %s and TST genTime %s differ by %s, the TSDelayTime bound is %s",
-			name, producedAt.UTC().Format(time.RFC3339), genTime.UTC().Format(time.RFC3339), diff, ts.tsDelayTime)
+			name, producedAt.UTC().Format(time.RFC3339), genTime.UTC().Format(time.RFC3339), producedAt.Sub(genTime), bound)
 		return
 	}
 	report.SigningTime = genTime
 }
 
 // checkUSPShape enforces the strict xades:UnsignedProperties shape
-// (ADR 0003 section 3; the collector's schema-driven parser rejects
+// (ADR 0003 section 3; the reference implementation's schema-driven parser rejects
 // unknown/mis-ordered elements) and returns the embedded TST and OCSP
 // response bytes:
 //
@@ -702,7 +725,7 @@ func checkTSProperties(obj, sv *etree.Element, cert *x509.Certificate, declaredS
 //	    xades:EncapsulatedTimeStamp     (exactly one; base64 DER TST)
 //	  xades:CertificateValues
 //	    xades:EncapsulatedX509Certificate (at least one; values not
-//	    validated — the collector checks presence only)
+//	    validated — the reference implementation checks presence only)
 //	  xades:RevocationValues
 //	    xades:OCSPValues                (exactly one; no CRL values)
 //	      xades:EncapsulatedOCSPValue   (exactly one; base64 DER OCSP)
@@ -767,7 +790,7 @@ func checkUSPShape(obj *etree.Element, name string, fail func(string, ...any)) (
 	// EncapsulatedTimeStamp; nothing else. The CanonicalizationMethod
 	// may carry the ds: or xades: prefix (the testMIDTS fixture uses
 	// ds:) and must be the C14N 1.1 algorithm when present (the
-	// collector's timestamp check).
+	// reference implementation's timestamp check).
 	var tstB64 string
 	for _, ch := range tsEl.ChildElements() {
 		ns := namespaceOf(ch)
@@ -796,7 +819,7 @@ func checkUSPShape(obj *etree.Element, name string, fail func(string, ...any)) (
 		return nil, nil, false
 	}
 	// CertificateValues: at least one embedded certificate (presence
-	// only — the collector does not validate the certificate values).
+	// only — the reference implementation does not validate the certificate values).
 	certs := directElements(cvEl, xades.NSXAdES, "EncapsulatedX509Certificate")
 	if len(certs) == 0 {
 		fail("%s: xades:CertificateValues has no xades:EncapsulatedX509Certificate", name)
@@ -832,16 +855,16 @@ func checkUSPShape(obj *etree.Element, name string, fail func(string, ...any)) (
 	return tst, ocspDER, true
 }
 
-// checkTimestampTS mirrors the collector's timestamp check (offline
+// checkTimestampTS mirrors the reference implementation's timestamp check (offline
 // path): the embedded TST is verified over the C14N 1.1 canonical
 // ds:SignatureValue element — the TST message imprint is the digest of
 // exactly those bytes (ADR 0003 section 1). It returns the TST genTime.
 // The offline TST verifier does not check genTime against the current
-// time (the collector's stored-token path either); staleness is
+// time (the reference implementation's stored-token path either); staleness is
 // defended by the TSDelayTime comparison instead.
 //
 // The TST verifier carries the TSA-signer pool as its trust boundary
-// (ADR 0004): the collector's offline TST check identifies the signer
+// (ADR 0004): the reference implementation's offline TST check identifies the signer
 // from the trust YAML tsp.signers list and never chains it to a PKI
 // root (the
 // 2023 SK fixtures' TSA CA is not in the trust YAML either), so the
@@ -862,14 +885,14 @@ func checkTimestampTS(tst []byte, sv *etree.Element, ts *tsContext, name string,
 	return gen, true
 }
 
-// checkOCSPResponse mirrors the collector's OCSP check over the STORED
+// checkOCSPResponse mirrors the reference implementation's OCSP check over the STORED
 // (offline) response (the full-response check at the signature time):
 // the embedded OCSP
 // response is unmarshaled, its status must be Good for the signer
 // certificate's certID, the response signature must verify with the
 // responder (the configured responder, or the signer's issuer
 // fallback), and producedAt must lie within [thisUpdate,
-// thisUpdate + 1 minute] (the collector's stored-response window). It
+// thisUpdate + 1 minute] (the reference implementation's stored-response window). It
 // returns the producedAt.
 func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time, ts *tsContext, name string, fail func(string, ...any)) (time.Time, bool) {
 	var outer ocspOuter
@@ -904,7 +927,7 @@ func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time
 		fail("%s: OCSP certificate status is not Good (raw % x)", name, single.Status.FullBytes)
 		return time.Time{}, false
 	}
-	// certID match (the collector's CertID: SHA-1 of the issuer name
+	// certID match (the reference implementation's CertID: SHA-1 of the issuer name
 	// DER, the issuer key, the serial).
 	nameHash := sha1.Sum(cert.RawIssuer)
 	cid := single.CertID
@@ -913,7 +936,7 @@ func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time
 		return time.Time{}, false
 	}
 	// IssuerKeyHash: accept the RFC 6960 value (SHA-1 of the issuer's
-	// SPKI key value) or the Estonian SK/collector convention (the
+	// SPKI key value) or the SK/reference implementation convention (the
 	// signer's AuthorityKeyId). They coincide when the issuer's SKI is
 	// SHA-1(SPKI); non-SK CAs (e.g. Akamu) differ, so a conformant
 	// response only matches the RFC 6960 value. An unresolvable issuer
@@ -949,7 +972,7 @@ func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time
 		fail("%s: %v", name, err)
 		return time.Time{}, false
 	}
-	// The stored-response window (the collector's stored-response check):
+	// The stored-response window (the reference implementation's stored-response check):
 	// producedAt >= thisUpdate and producedAt - thisUpdate <= maxAge.
 	if rd.ProducedAt.Before(single.ThisUpdate) {
 		fail("%s: OCSP producedAt %s is before thisUpdate %s", name,
@@ -965,13 +988,13 @@ func checkOCSPResponse(ocspDER []byte, cert *x509.Certificate, sigTime time.Time
 }
 
 // ocspResponder finds the certificate that must have signed the
-// response (mirroring the collector's responder identification): first
+// response (mirroring the reference implementation's responder identification): first
 // a configured
 // responder whose subject matches the response ResponderID name, then
 // the issuer fallback — the first embedded certificate with a matching
 // subject that chains to the signer's issuer with the OCSPSigning EKU
 // (a name-matching certificate that fails the chain verification is an
-// error, per the collector).
+// error, per the reference implementation).
 func ocspResponder(m asiccrypto.OCSPVerifierModule, name pkix.RDNSequence, embedded []asn1.RawValue, configured []*x509.Certificate, issuer *x509.Certificate, at time.Time) (*x509.Certificate, error) {
 	for _, r := range configured {
 		r.Subject.ExtraNames = r.Subject.Names
@@ -1000,7 +1023,7 @@ func ocspResponder(m asiccrypto.OCSPVerifierModule, name pkix.RDNSequence, embed
 }
 
 // issuerCertificate finds the signer's issuer certificate among the
-// supplied trust certificates (the collector's configured issuer
+// supplied trust certificates (the reference implementation's configured issuer
 // trust set used for the OCSP check).
 func issuerCertificate(cert *x509.Certificate, roots, intermediates []*x509.Certificate) *x509.Certificate {
 	pool := make([]*x509.Certificate, 0, len(roots)+len(intermediates))
@@ -1016,7 +1039,7 @@ func issuerCertificate(cert *x509.Certificate, roots, intermediates []*x509.Cert
 
 // rdnSequenceEqual compares two RDN sequences attribute by attribute
 // (same order, type and value) — the responder-name match semantics
-// the collector uses.
+// the reference implementation uses.
 func rdnSequenceEqual(a, b pkix.RDNSequence) bool {
 	if len(a) != len(b) {
 		return false
@@ -1054,7 +1077,7 @@ func rdnSequenceEqual(a, b pkix.RDNSequence) bool {
 // --- embedded OCSP response (RFC 6960) decode types ---
 //
 // Same field order, tags and optionals as the OCSP response shapes
-// the collector unmarshals (and testutil, which builds the generated
+// the reference implementation unmarshals (and testutil, which builds the generated
 // responses).
 
 // ocspOuter is the OCSPResponse wrapper; only the "successful" form

@@ -11,6 +11,9 @@ package asic
 import (
 	"archive/zip"
 	"bytes"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/pem"
 	"io"
 	"os"
@@ -19,8 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"crypto/x509"
-
+	asiccrypto "github.com/isri-pqc/go-asice/asic/crypto"
 	"github.com/isri-pqc/go-asice/testutil"
 	"github.com/isri-pqc/go-xmlsig/spec"
 )
@@ -184,6 +186,9 @@ func TestCreateTS(t *testing.T) {
 		TimeStamp: func(data []byte) ([]byte, error) {
 			return p.TimeStampToken(data, testutil.TSTOptions{GenTime: createT})
 		},
+		// The hermetic TST carries no TSDelayTime policy parameter; the
+		// explicit bound feeds the create-time guard.
+		TSDelay:        60 * time.Second,
 		OCSPResponse:   ocsp,
 		TSCertificates: []*x509.Certificate{p.OCSPResponder.Certificate, p.Issuer.Certificate},
 	})
@@ -206,6 +211,179 @@ func TestCreateTS(t *testing.T) {
 	}
 	if !rep.OK {
 		t.Fatalf("self-verify FAILED: %v", rep.Errors)
+	}
+}
+
+// --- create-time TSDelayTime guard (the same predicate verify applies) ---
+
+// tsGuardPKI builds the TS-profile Create options skeleton for the
+// TSDelayTime guard tests: hermetic PKI, one document, standard
+// modules, the TST at genTime (with the optional policy bound).
+func newTSTSGuardFixture(t *testing.T) (*testutil.PKI, []Doc, Signer, []byte) {
+	t.Helper()
+	p := newCreatePKI(t)
+	docs := []Doc{{Name: "test.txt", MediaType: "text/plain", Data: []byte("guard data")}}
+	s, err := ParseSigner(signerPEM(t, p.Signer))
+	if err != nil {
+		t.Fatal(err)
+	}
+	ocsp, err := p.OCSPResponse(createT) // producedAt = createT
+	if err != nil {
+		t.Fatal(err)
+	}
+	return p, docs, s, ocsp
+}
+
+func tsGuardTST(p *testutil.PKI, genTime time.Time, policyBound time.Duration) func(data []byte) ([]byte, error) {
+	opts := testutil.TSTOptions{GenTime: genTime}
+	if policyBound > 0 {
+		policy := asn1.ObjectIdentifier{0, 4, 0, 2023, 1, 1}
+		secs, err := asn1.Marshal(int(policyBound.Seconds()))
+		if err != nil {
+			panic(err)
+		}
+		opts.Policy = policy
+		opts.Extensions = []pkix.Extension{{Id: policy, Value: secs}}
+	}
+	return func(data []byte) ([]byte, error) {
+		return p.TimeStampToken(data, opts)
+	}
+}
+
+func tsGuardVerifyOptions(t *testing.T, p *testutil.PKI) VerifyOptions {
+	t.Helper()
+	o := stdVerifyOptions(ProfileTS)
+	o.RootsPEM = p.Root.PEM
+	o.IntermediatesPEM = p.Issuer.PEM
+	o.OCSPRespondersPEM = p.OCSPResponder.PEM
+	tstSigners, err := ParsePEMCerts(p.TSA.PEM)
+	if err != nil {
+		t.Fatal(err)
+	}
+	o.TSTVerifier = asiccrypto.NewStdTSTVerifierModule(tstSigners, []*x509.Certificate{p.Issuer.Certificate})
+	return o
+}
+
+// TestCreateTSTSDelayWithinBound: the create-time guard passes when the
+// stored OCSP producedAt is inside the bound of the TST genTime. The
+// bound comes from the TST's TSA policy (no explicit TSDelay), and the
+// container self-verifies under the TS profile.
+func TestCreateTSTSDelayWithinBound(t *testing.T) {
+	p, docs, s, ocsp := newTSTSGuardFixture(t)
+	var buf bytes.Buffer
+	err := Create(&buf, CreateOptions{
+		Docs:           docs,
+		Signers:        []Signer{s},
+		Profile:        ProfileTS,
+		SigningTime:    createT,
+		DigestModule:   stdDigestModule(),
+		TimeStamp:      tsGuardTST(p, createT, 60*time.Second), // genTime == producedAt: gap 0
+		OCSPResponse:   ocsp,
+		TSCertificates: []*x509.Certificate{p.OCSPResponder.Certificate, p.Issuer.Certificate},
+	})
+	if err != nil {
+		t.Fatalf("Create: %v (want success inside the bound)", err)
+	}
+	rep, err := Verify(writeTemp(t, "ts.asice", buf.Bytes()), tsGuardVerifyOptions(t, p))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !rep.OK {
+		t.Fatalf("self-verify FAILED: %v / %v", rep.Errors, sigErrors(rep))
+	}
+}
+
+// TestCreateTSTSDelayStaleOCSP: a stale stored OCSP (producedAt OUTSIDE
+// the bound of the TST genTime) fails create with the stable, greppable
+// TSDelayTime message and no container is written. Both bound sources
+// are covered: the TST policy and the explicit TSDelay.
+func TestCreateTSTSDelayStaleOCSP(t *testing.T) {
+	p, docs, s, ocsp := newTSTSGuardFixture(t)
+	// genTime = createT + 5 min, producedAt = createT: the gap is
+	// -5 min, outside [0, bound].
+	cases := []struct {
+		name     string
+		tsDelay  time.Duration // 0: the policy bound
+		policyOK bool
+	}{
+		{"policy bound", 0, true},
+		{"explicit bound", 60 * time.Second, false},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			var buf bytes.Buffer
+			err := Create(&buf, CreateOptions{
+				Docs:           docs,
+				Signers:        []Signer{s},
+				Profile:        ProfileTS,
+				SigningTime:    createT,
+				DigestModule:   stdDigestModule(),
+				TimeStamp:      tsGuardTST(p, createT.Add(5*time.Minute), 60*time.Second),
+				TSDelay:        tc.tsDelay,
+				OCSPResponse:   ocsp,
+				TSCertificates: []*x509.Certificate{p.OCSPResponder.Certificate, p.Issuer.Certificate},
+			})
+			if err == nil {
+				t.Fatal("Create succeeded, want the TSDelayTime failure")
+			}
+			msg := err.Error()
+			for _, want := range []string{"TSDelayTime", "OCSP producedAt", "TST genTime", "the TSDelayTime bound is"} {
+				if !strings.Contains(msg, want) {
+					t.Errorf("error %q lacks %q", msg, want)
+				}
+			}
+			if buf.Len() != 0 {
+				t.Error("container written despite the TSDelayTime failure")
+			}
+		})
+	}
+}
+
+// TestCreateTSDelaySharedWithVerify: the same violating pairing that the
+// create-time guard rejects fails at verify time with the same message —
+// one predicate (tsDelayOK), one verdict.
+func TestCreateTSDelaySharedWithVerify(t *testing.T) {
+	p, docs, s, ocsp := newTSTSGuardFixture(t)
+	// Build the violating container directly over the primitives
+	// (bypassing the create-time guard).
+	sig, err := SignTS(0, s.SignerModule, stdDigestModule(), s.Certificate, docs, createT, TSData{
+		TimeStamp:    tsGuardTST(p, createT.Add(5*time.Minute), 60*time.Second),
+		OCSPResponse: ocsp,
+		Certificates: []*x509.Certificate{p.OCSPResponder.Certificate, p.Issuer.Certificate},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	var buf bytes.Buffer
+	if err := WriteContainer(&buf, docs, sig); err != nil {
+		t.Fatal(err)
+	}
+	o := tsGuardVerifyOptions(t, p)
+	o.TSDelayTime = 60 * time.Second
+	expectFail(t, writeTemp(t, "ts.asice", buf.Bytes()), o, "the TSDelayTime bound is")
+}
+
+// TestCreateTSTSDelayNoBound: no explicit TSDelay and a TST without the
+// policy parameter -> the actionable no-bound failure, before the
+// container is written (predict verify, fail early).
+func TestCreateTSTSDelayNoBound(t *testing.T) {
+	p, docs, s, ocsp := newTSTSGuardFixture(t)
+	var buf bytes.Buffer
+	err := Create(&buf, CreateOptions{
+		Docs:           docs,
+		Signers:        []Signer{s},
+		Profile:        ProfileTS,
+		SigningTime:    createT,
+		DigestModule:   stdDigestModule(),
+		TimeStamp:      tsGuardTST(p, createT, 0), // no policy bound
+		OCSPResponse:   ocsp,
+		TSCertificates: []*x509.Certificate{p.OCSPResponder.Certificate, p.Issuer.Certificate},
+	})
+	if err == nil || !strings.Contains(err.Error(), "no TSDelayTime bound") {
+		t.Fatalf("Create error = %v, want the no TSDelayTime bound failure", err)
+	}
+	if buf.Len() != 0 {
+		t.Error("container written despite the no-bound failure")
 	}
 }
 

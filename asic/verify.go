@@ -1,6 +1,6 @@
 // Self-verification of ASiC-E containers: the verification core of
 // asic.Verify (T8a BES core + T8b TS profile). It mirrors the check
-// order of the Estonian e-voting collector's container verification —
+// order of the reference implementation's container verification —
 // container structure,
 // then per signature: XML shape, signer certificate, signing time,
 // certificate chain, signature value (C14N 1.1 of SignedInfo),
@@ -37,7 +37,7 @@ import (
 // Profile selects the ASiC-E verification profile.
 type Profile int
 
-// Verification profiles (the collector's verification profiles).
+// Verification profiles (the reference implementation's verification profiles).
 const (
 	// ProfileBES verifies the BES core: container structure, file
 	// digests, C14N 1.1, signature cryptography, certificate chain,
@@ -72,16 +72,18 @@ type VerifyOptions struct {
 	// ocsp.responders list). Optional for ProfileTS: when the embedded
 	// responder certificate is not in the list, the response is
 	// verified against the signer's issuer certificate instead (the
-	// collector's issuer fallback).
+	// reference implementation's issuer fallback).
 	OCSPRespondersPEM []byte
 
 	// --- TS-profile trust bounds (ProfileTS; ADR 0003) ---
 	// These are trust parameters, not algorithmic constants: the caller
-	// supplies the policy its trust store enforces. Zero means the
-	// built-in default (the Estonian e-voting collector's value).
+	// supplies the policy its trust store enforces.
 
-	// TSDelayTime bounds |OCSP producedAt - TST genTime| (the trust YAML
-	// "tsdelaytime"). Zero means the default (60 s).
+	// TSDelayTime is the explicit TSDelayTime bound of the TST genTime
+	// and OCSP producedAt difference (0 <= producedAt - genTime <=
+	// TSDelayTime). Zero means resolve it from each TST's TSA policy
+	// (the policy-parameter extension, tsa.TSDelayFromToken); a TST
+	// without the bound fails the check with an actionable error.
 	TSDelayTime time.Duration
 
 	// OCSPMaxAge bounds (OCSP producedAt - thisUpdate) for the stored
@@ -96,7 +98,7 @@ type VerifyOptions struct {
 	// VerifierModule verifies the XML-DSig signature value against the
 	// KeyInfo certificate. Required.
 	VerifierModule xcrypto.XMLSignatureVerifierModule
-	// ChainModule verifies the signer certificate chain (the collector's
+	// ChainModule verifies the signer certificate chain (the reference implementation's
 	// semantics). Required.
 	ChainModule asiccrypto.CertificateChainModule
 	// OCSPModule verifies the embedded OCSP response. Required for
@@ -183,22 +185,19 @@ func Verify(containerPath string, opts VerifyOptions) (*Report, error) {
 		if err != nil {
 			return nil, fmt.Errorf("asic: OCSP responders: %w", err)
 		}
-		tsDelayTime := opts.TSDelayTime
-		if tsDelayTime <= 0 {
-			tsDelayTime = defaultTSDelayTime
-		}
+		tsDelayTime := opts.TSDelayTime // zero: resolve per TST from the TSA policy
 		ocspThisUpdateMaxAge := opts.OCSPMaxAge
 		if ocspThisUpdateMaxAge <= 0 {
 			ocspThisUpdateMaxAge = defaultOCSPThisUpdateMaxAge
 		}
 		ts = &tsContext{
-			roots:                  roots,
-			intermediates:          intermediates,
-			ocspResponders:         ocspResponders,
-			ocspModule:             opts.OCSPModule,
-			tstVerifier:            opts.TSTVerifier,
-			tsDelayTime:            tsDelayTime,
-			ocspThisUpdateMaxAge:   ocspThisUpdateMaxAge,
+			roots:                roots,
+			intermediates:        intermediates,
+			ocspResponders:       ocspResponders,
+			ocspModule:           opts.OCSPModule,
+			tstVerifier:          opts.TSTVerifier,
+			tsDelayTime:          tsDelayTime,
+			ocspThisUpdateMaxAge: ocspThisUpdateMaxAge,
 		}
 	}
 	raw, err := os.ReadFile(containerPath)
@@ -231,8 +230,9 @@ type tsContext struct {
 	// configured on the verifier).
 	tstVerifier asiccrypto.TSTVerifierModule
 	// tsDelayTime and ocspThisUpdateMaxAge are the TS-profile trust
-	// bounds (TSDelayTime and the stored-OCSP maxAge); the VerifyOptions
-	// values, or the defaults when those are zero.
+	// bounds (TSDelayTime and the stored-OCSP maxAge): the VerifyOptions
+	// values. A zero tsDelayTime is resolved per signature from the
+	// TST's TSA policy (tsa.TSDelayFromToken).
 	tsDelayTime          time.Duration
 	ocspThisUpdateMaxAge time.Duration
 }
@@ -245,7 +245,7 @@ type verifyModules struct {
 	digest xcrypto.XMLDigestModule
 	// verifier verifies the XML-DSig signature value.
 	verifier xcrypto.XMLSignatureVerifierModule
-	// chain verifies the signer certificate chain (the collector's
+	// chain verifies the signer certificate chain (the reference implementation's
 	// semantics).
 	chain asiccrypto.CertificateChainModule
 	// roots are the trust anchors the signer must chain to.
@@ -325,7 +325,7 @@ func (c *container) fileNames() []string {
 	return names
 }
 
-// sigFileRE matches the signature file names the collector's container
+// sigFileRE matches the signature file names the reference implementation's container
 // open accepts (case-sensitive).
 var sigFileRE = regexp.MustCompile(`^META-INF/[^/]*signatures[^/]*\.xml$`)
 
@@ -342,8 +342,8 @@ var maxEntryUncompressed = int64(64 << 20) // 64 MiB per entry
 var maxTotalUncompressed = int64(256 << 20) // 256 MiB total
 
 // openContainer validates the container structure the way the
-// Estonian e-voting collector's container open does (PLAN.md §1.1; the
-// error strings mirror the collector's rejection taxonomy):
+// reference implementation's container open does (PLAN.md §1.1; the
+// error strings mirror the reference implementation's rejection taxonomy):
 // stored "mimetype" magic entry with the exact ASiC-E content type,
 // META-INF/manifest.xml, flat data files, signature files matching
 // sigFileRE, and a manifest covering every data file. Entry and total
@@ -367,7 +367,7 @@ func openContainer(raw []byte) (*container, []string) {
 	}
 
 	// The first entry must be the stored "mimetype" magic file with
-	// the exact ASiC-E content type (TS 102 918 §A.1; the collector's
+	// the exact ASiC-E content type (TS 102 918 §A.1; the reference implementation's
 	// first-entry magic check): local header at byte 0, no
 	// data descriptor, no extra field, stored method, exact content.
 	first := entries[0]
@@ -488,7 +488,7 @@ func readZipEntry(ef *zip.File, name string) ([]byte, error) {
 const nsODFManifest = "urn:oasis:names:tc:opendocument:xmlns:manifest:1.0"
 
 // parseManifest validates the ODF v1.0 manifest the way the
-// collector's manifest check does: a manifest:manifest root, exactly
+// reference implementation's manifest check does: a manifest:manifest root, exactly
 // one "/" root
 // entry carrying the ASiC-E media type, no signature file entries, no
 // duplicate entries, a media type on every entry, and an entry for

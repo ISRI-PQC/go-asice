@@ -1,9 +1,9 @@
 // RFC 4514 issuer-name rendering with the byte semantics the interop
-// contract with the Estonian e-voting collector (the library's interop
+// contract with the reference implementation (the library's interop
 // target; see the README) pins: short-name map, most-specific-first
-// order, and the collector's escaping (non-standard or non-string
+// order, and the reference implementation's escaping (non-standard or non-string
 // values hex-encoded from their DER). The rendered string must
-// round-trip the collector's RDN decode + sequence-equality check
+// round-trip the reference implementation's RDN decode + sequence-equality check
 // against cert.Issuer (ExtraNames = Names) — the comparison its
 // SigningCertificate verification performs — and byte-match the
 // fixtures' ds:X509IssuerName values.
@@ -21,7 +21,7 @@ import (
 )
 
 // rdnShortNames maps attribute OIDs to the RFC 4514 short names the
-// collector's issuer-name encoder uses.
+// reference implementation's issuer-name encoder uses.
 var rdnShortNames = map[string]string{
 	"1.2.840.113549.1.9.1": "emailAddress",
 	"2.5.4.3":              "CN",
@@ -36,18 +36,18 @@ var rdnShortNames = map[string]string{
 	"2.5.4.97":             "organizationIdentifier",
 }
 
-// rdnEscapeRE marks the characters the collector's RFC 4514
+// rdnEscapeRE marks the characters the reference implementation's RFC 4514
 // issuer-name encoder escapes.
 var rdnEscapeRE = regexp.MustCompile(`(^#|^ |["+,;<=>\\]| $)`)
 
 // EncodeRDNSequence encodes a relative-distinguished-name sequence into
-// an RFC 4514 string byte-identically to the Estonian e-voting
-// collector's RDN encoder.
+// an RFC 4514 string byte-identically to the reference
+// implementation's RDN encoder.
 //
 // Go's pkix.Name stores every parsed attribute in Names in DER order;
 // ToRDNSequence uses ExtraNames (which parsing leaves empty), so callers
 // must set name.ExtraNames = name.Names first — exactly what the
-// collector does
+// reference implementation does
 // before comparing issuer names.
 func EncodeRDNSequence(dn pkix.RDNSequence) string {
 	var parts []string
@@ -61,7 +61,7 @@ func EncodeRDNSequence(dn pkix.RDNSequence) string {
 				value = rdnEscapeRE.ReplaceAllString(s, `\$1`)
 				value = strings.ReplaceAll(value, "\x00", "\\00")
 			} else {
-				// Hex-encoded DER of the value, like the collector's encoder.
+				// Hex-encoded DER of the value, like the reference implementation's encoder.
 				short = oid
 				der, err := asn1.Marshal(atv.Value)
 				if err != nil {
@@ -80,8 +80,8 @@ func EncodeRDNSequence(dn pkix.RDNSequence) string {
 
 // IssuerName renders the RFC 4514 issuer DN of cert for use in
 // ds:X509IssuerName. It encodes cert.Issuer with ExtraNames = Names
-// (the form the Estonian e-voting collector compares against), so the
-// result round-trips the collector's RDN decode + sequence-equality
+// (the form the reference implementation compares against), so the
+// result round-trips the reference implementation's RDN decode + sequence-equality
 // check.
 func IssuerName(cert *x509.Certificate) string {
 	name := cert.Issuer

@@ -1,12 +1,12 @@
 // Self-checks of the rendered XAdES properties, mirroring the property
-// verification the Estonian e-voting collector (the library's interop
+// verification the reference implementation (the library's interop
 // target; see the README "Verification" section) performs on a BDOC
 // container: the SigningCertificate invariants (CertDigest over the
 // KeyInfo certificate DER, decimal serial, RFC 4514 issuer name) and
 // the DataObjectFormat invariants (one per signed file, MimeType
 // matching the manifest media type). These check a parsed signature
 // document produced by this package; the acceptance bar remains the
-// collector's own container verification, enforced by the external
+// reference implementation's own container verification, enforced by the external
 // acceptance harness (maintained outside this repo).
 
 package xades
@@ -23,7 +23,7 @@ import (
 )
 
 // digestMethods is the ds:DigestMethod algorithm allowlist the
-// Estonian e-voting collector accepts (SHA-256, SHA-384, SHA-512).
+// reference implementation accepts (SHA-256, SHA-384, SHA-512).
 var digestMethods = map[string]struct{}{
 	"http://www.w3.org/2001/04/xmlenc#sha256":       {},
 	"http://www.w3.org/2001/04/xmldsig-more#sha384": {},
@@ -32,8 +32,8 @@ var digestMethods = map[string]struct{}{
 
 // CheckSigningCertificate verifies the xades:SigningCertificate inside
 // the xades:SignedSignatureProperties element ssp against the signer
-// certificate cert, as the interop contract with the Estonian
-// e-voting collector requires (XAdES TS 101 893 SigningCertificate):
+// certificate cert, as the interop contract with the reference
+// implementation requires (XAdES TS 101 893 SigningCertificate):
 //
 //   - the CertDigest must digest the exact certificate DER (cert.Raw)
 //     with an algorithm from the digestMethods allowlist;
@@ -80,7 +80,7 @@ func CheckSigningCertificate(dm xcrypto.XMLDigestModule, ssp *etree.Element, cer
 // CheckSignedProperties verifies a rendered xades:SignedProperties
 // element sp against the signer certificate cert and the signed files
 // (in reference order, for signature k), mirroring the
-// SignedProperties checks the Estonian e-voting collector applies plus
+// SignedProperties checks the reference implementation applies plus
 // its DataObjectFormat invariants:
 //
 //   - SignaturePolicyIdentifier must be absent (BES/TS profiles);

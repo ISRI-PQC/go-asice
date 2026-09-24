@@ -27,6 +27,7 @@ type createInput struct {
 	ocspFile    string
 	tstURL      string
 	tstSigners  string
+	tsDelay     time.Duration
 	signingTime time.Time
 	docs        []string
 }
@@ -147,6 +148,7 @@ func runCreateCmd(ctx context.Context, stderr io.Writer, in createInput) error {
 		client.SignatureVerifierModule = tsacrypto.NewStdSignatureVerifierModule()
 		opts.OCSPResponse = ocsp
 		opts.TSCertificates = chain
+		opts.TSDelay = in.tsDelay
 		opts.TimeStamp = func(data []byte) ([]byte, error) {
 			token, _, err := client.Create(ctx, data, nil)
 			return token, err

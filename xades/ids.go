@@ -6,11 +6,11 @@
 // single-line base64), not part of the interop contract: the canonical
 // bytes depend on the layout but are self-consistent, because we
 // canonicalize and sign the final rendering (inclusive C14N 1.1) and
-// the Estonian e-voting collector (the library's interop target; see
+// the reference implementation (the library's interop target; see
 // the README) re-canonicalizes the parsed document with the same
 // algorithm. The hard constraints are the TST-flow self-consistency
 // (the TST imprints the canonical ds:SignatureValue as rendered) and
-// the collector's structural parser (element shape/order/Id/Type).
+// the reference implementation's structural parser (element shape/order/Id/Type).
 // See docs/adr/0001-canonicalization-and-container-rules.md.
 package xades
 
@@ -26,8 +26,8 @@ const (
 	NSXAdES = "http://uri.etsi.org/01903/v1.3.2#"
 )
 
-// Algorithm URIs the property XML uses (the Estonian e-voting
-// collector's digest-method allowlist; PLAN §5 locks SHA-256 for
+// Algorithm URIs the property XML uses (the reference
+// implementation's digest-method allowlist; PLAN §5 locks SHA-256 for
 // emission).
 const (
 	// DigestMethodSHA256 is the ds:DigestMethod algorithm of every
