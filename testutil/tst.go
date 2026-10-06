@@ -1,6 +1,7 @@
 package testutil
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/sha1"
 	"crypto/sha256"
@@ -8,6 +9,7 @@ import (
 	"encoding/asn1"
 	"fmt"
 	"math/big"
+	"sort"
 	"time"
 )
 
@@ -213,7 +215,9 @@ func (p *PKI) TimeStampToken(data []byte, opts TSTOptions) ([]byte, error) {
 	}
 
 	// Signed attributes, in the fixture's order, each value a one-element
-	// SET. Go's asn1 preserves slice order (no SET OF sorting).
+	// SET. The slice order is not the token order: the set-tagged
+	// SignedAttrs field is DER-sorted on marshal, and the signature
+	// below covers the same canonical order (X.690 11.6).
 	attrs := []cmsSignedAttribute{
 		{AttrType: oidAttrContentType, AttrValue: attrSetOf(oidCTTSTInfo)},
 		{AttrType: oidAttrSigningTime, AttrValue: attrSetOf(gentime)},
@@ -242,10 +246,26 @@ func (p *PKI) TimeStampToken(data []byte, opts TSTOptions) ([]byte, error) {
 	sc := signingCertificateV2{Certs: []essCertIDv2{ess}}
 	attrs = append(attrs, cmsSignedAttribute{AttrType: oidAttrSigningCert, AttrValue: attrSetOf(sc)})
 
-	// Sign over the signed attrs: CMS encodes them as SET OF (tag 0x31);
-	// Go marshals the slice as SEQUENCE OF, so patch the tag exactly as
-	// the reference implementation's TST signature check reconstructs it.
-	attrsDER, err := asn1.Marshal(attrs)
+	// Sign over the canonical encoding: CMS encodes the signed attrs as
+	// a SET OF (tag 0x31) and DER (X.690 11.6) orders SET OF components
+	// by ascending encoding — the bytes the strict verifiers
+	// (BouncyCastle, go-asice tsa.Validator) re-derive. A plain-slice
+	// marshal keeps slice order, so the per-attribute encodings are
+	// sorted before signing.
+	perAttr := make([][]byte, 0, len(attrs))
+	for _, a := range attrs {
+		der, err := asn1.Marshal(a)
+		if err != nil {
+			return nil, fmt.Errorf("marshal signed attr: %w", err)
+		}
+		perAttr = append(perAttr, der)
+	}
+	sort.Slice(perAttr, func(i, j int) bool { return bytes.Compare(perAttr[i], perAttr[j]) < 0 })
+	rawAttrs := make([]asn1.RawValue, 0, len(perAttr))
+	for _, der := range perAttr {
+		rawAttrs = append(rawAttrs, asn1.RawValue{FullBytes: der})
+	}
+	attrsDER, err := asn1.Marshal(rawAttrs)
 	if err != nil {
 		return nil, fmt.Errorf("marshal signed attrs: %w", err)
 	}

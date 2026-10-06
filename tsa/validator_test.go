@@ -7,9 +7,15 @@
 package tsa
 
 import (
+	"bytes"
+	"crypto"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/asn1"
 	"math/big"
+	"sort"
 	"testing"
 	"time"
 
@@ -93,6 +99,126 @@ func TestValidatorTestTSTTampered(t *testing.T) {
 			t.Errorf("Validator.Check accepted a TST with byte %d flipped", offset)
 		}
 	}
+}
+
+// TestValidatorNonCanonicalSignedAttrs: a signature over the
+// non-canonical (emission-order) encoding of the signed attributes
+// must be rejected by checkSignature. The check verifies the
+// signature over the canonical DER re-encoding (X.690 11.6) — the
+// order BouncyCastle/DSS re-derive; a wire-order check would accept
+// it (the leniency that let a mis-ordered hand-rolled TSA pass the
+// Go gate while the Java gate failed).
+func TestValidatorNonCanonicalSignedAttrs(t *testing.T) {
+	data := make([]byte, 256)
+	if _, err := rand.Read(data); err != nil {
+		t.Fatalf("rand: %v", err)
+	}
+	p, token := newTestTSA(t, data, testutil.TSTOptions{})
+
+	ts, err := Parse(token)
+	if err != nil {
+		t.Fatalf("Parse: %v", err)
+	}
+	attrs := ts.Content.SignerInfos[0].SignedAttrs // canonical wire order
+	if len(attrs) != 4 {
+		t.Fatalf("token has %d signed attributes, want 4", len(attrs))
+	}
+	byOID := make(map[string]SignedAttr, len(attrs))
+	for _, a := range attrs {
+		byOID[a.AttrType.String()] = a
+	}
+
+	v := withStdModules(&Validator{
+		Roots:      []*x509.Certificate{p.Root.Certificate},
+		TSTSigners: []*x509.Certificate{p.TSA.Certificate},
+	})
+	null := asn1.RawValue{FullBytes: asn1.NullBytes}
+	sInfo := SignerInfo{
+		DigestAlgorithm:    pkix.AlgorithmIdentifier{Algorithm: oidSHA256, Parameters: null},
+		SignedAttrs:        attrs,
+		SignatureAlgorithm: pkix.AlgorithmIdentifier{Algorithm: oidECDSASHA256, Parameters: null},
+	}
+
+	// Positive control: a signature over the canonical re-encoding verifies.
+	canonical, err := canonicalSignedAttrsDER(attrs)
+	if err != nil {
+		t.Fatalf("encode canonical attrs: %v", err)
+	}
+	sum := sha256.Sum256(canonical)
+	sigOK, err := p.TSA.PrivateKey.Sign(rand.Reader, sum[:], crypto.SHA256)
+	if err != nil {
+		t.Fatalf("sign canonical attrs: %v", err)
+	}
+	sInfo.Signature = sigOK
+	if err := v.checkSignature(sInfo, p.TSA.Certificate); err != nil {
+		t.Fatalf("checkSignature rejected a signature over the canonical attrs: %v", err)
+	}
+
+	// Negative: the non-canonical OID order (ct, md, st, sc — the
+	// pre-fix pki/tsa emission order; the long messageDigest attribute
+	// precedes the shorter signingTime) signed in that order, as a
+	// mis-ordered TSA does.
+	reordered := []SignedAttr{byOID[oidAttrContentType], byOID[oidAttrMessageDigest], byOID[oidAttrSigningTime], byOID[oidAttrSigningCert]}
+	nonCanonical, err := signedAttrsDER(reordered)
+	if err != nil {
+		t.Fatalf("encode non-canonical attrs: %v", err)
+	}
+	sum = sha256.Sum256(nonCanonical)
+	sig, err := p.TSA.PrivateKey.Sign(rand.Reader, sum[:], crypto.SHA256)
+	if err != nil {
+		t.Fatalf("sign non-canonical attrs: %v", err)
+	}
+	// The signature is valid over the non-canonical bytes — exactly
+	// what a wire-order (pre-fix) verifier would accept.
+	if err := p.TSA.Certificate.CheckSignature(x509.ECDSAWithSHA256, nonCanonical, sig); err != nil {
+		t.Fatalf("signature does not verify over the non-canonical bytes: %v", err)
+	}
+	sInfoNon := sInfo
+	sInfoNon.SignedAttrs = reordered
+	sInfoNon.Signature = sig
+	if err := v.checkSignature(sInfoNon, p.TSA.Certificate); err == nil {
+		t.Fatalf("checkSignature accepted a signature over non-canonical signed-attribute order")
+	}
+}
+
+// signedAttrsDER encodes attrs in slice order as the CMS SET OF (0x31):
+// a plain-slice marshal carries no asn1 set tag, so no DER sorting
+// happens — the emission order is preserved.
+func signedAttrsDER(attrs []SignedAttr) ([]byte, error) {
+	raw := make([]cmsSignedAttribute, 0, len(attrs))
+	for _, a := range attrs {
+		raw = append(raw, cmsSignedAttribute{AttrType: a.AttrType, AttrValue: asn1.RawValue{Tag: 17, IsCompound: true, Bytes: a.AttrValue}})
+	}
+	der, err := asn1.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	der[0] = 0x31 // SET OF
+	return der, nil
+}
+
+// canonicalSignedAttrsDER is the same encoding in canonical DER order
+// (X.690 11.6) — the bytes checkSignature verifies against.
+func canonicalSignedAttrsDER(attrs []SignedAttr) ([]byte, error) {
+	per := make([][]byte, 0, len(attrs))
+	for _, a := range attrs {
+		der, err := asn1.Marshal(cmsSignedAttribute{AttrType: a.AttrType, AttrValue: asn1.RawValue{Tag: 17, IsCompound: true, Bytes: a.AttrValue}})
+		if err != nil {
+			return nil, err
+		}
+		per = append(per, der)
+	}
+	sort.Slice(per, func(i, j int) bool { return bytes.Compare(per[i], per[j]) < 0 })
+	raw := make([]asn1.RawValue, 0, len(per))
+	for _, d := range per {
+		raw = append(raw, asn1.RawValue{FullBytes: d})
+	}
+	der, err := asn1.Marshal(raw)
+	if err != nil {
+		return nil, err
+	}
+	der[0] = 0x31 // SET OF
+	return der, nil
 }
 
 // TestValidatorNonceMismatch: a supplied nonce different from the TST's

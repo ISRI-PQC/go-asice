@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"sort"
 	"time"
 
 	tcrypto "github.com/isri-pqc/go-asice/tsa/crypto"
@@ -472,7 +473,7 @@ func rawChildren(v asn1.RawValue) ([]asn1.RawValue, error) {
 // checkSignature mirrors the reference implementation's TST signature check: the
 // signature algorithm must be supported and paired with its digest,
 // and the signature must verify over the signed attributes re-encoded
-// as a SET OF (the CMS encoding).
+// in canonical DER order as a SET OF (X.690 11.6).
 func (v *Validator) checkSignature(sInfo SignerInfo, cert *x509.Certificate) error {
 	if len(sInfo.Signature) == 0 {
 		return errors.New("SignerInfo has no signature")
@@ -483,16 +484,29 @@ func (v *Validator) checkSignature(sInfo SignerInfo, cert *x509.Certificate) err
 			sInfo.SignatureAlgorithm.Algorithm, sInfo.DigestAlgorithm.Algorithm)
 	}
 
-	// Re-encode the signed attributes as the CMS signer did: the
-	// attribute SEQUENCEs wrapped in a SET OF (0x31). Go preserves
-	// slice order, so the encoding is byte-identical to the wire
-	// bytes (the attribute values are SET OF, kept from Parse).
-	raw := make([]cmsSignedAttribute, 0, len(sInfo.SignedAttrs))
+	// Re-encode the signed attributes in canonical DER order: the
+	// signature covers the SignedAttributes SET OF, and DER (X.690
+	// 11.6) encodes SET OF components in ascending encoding order —
+	// the bytes a strict CMS verifier (BouncyCastle, DSS) re-derives.
+	// The wire order is deliberately ignored: a token whose attributes
+	// are not in canonical order is non-conformant (its signature was
+	// made over the non-canonical bytes) and must fail the signature
+	// check.
+	ders := make([][]byte, 0, len(sInfo.SignedAttrs))
 	for _, a := range sInfo.SignedAttrs {
-		raw = append(raw, cmsSignedAttribute{
+		der, err := asn1.Marshal(cmsSignedAttribute{
 			AttrType:  a.AttrType,
 			AttrValue: asn1.RawValue{Tag: 17, IsCompound: true, Bytes: a.AttrValue},
 		})
+		if err != nil {
+			return fmt.Errorf("re-encode signed attributes: %w", err)
+		}
+		ders = append(ders, der)
+	}
+	sort.Slice(ders, func(i, j int) bool { return bytes.Compare(ders[i], ders[j]) < 0 })
+	raw := make([]asn1.RawValue, 0, len(ders))
+	for _, der := range ders {
+		raw = append(raw, asn1.RawValue{FullBytes: der})
 	}
 	attrsDER, err := asn1.Marshal(raw)
 	if err != nil {

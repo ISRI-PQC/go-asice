@@ -6,6 +6,7 @@
 package tsa
 
 import (
+	"bytes"
 	"crypto"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -21,6 +22,7 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sort"
 	"time"
 )
 
@@ -189,7 +191,26 @@ func (s *testServer) issue(req TimeStampReq) ([]byte, error) {
 		{AttrType: cmsAttrMessageDigest, AttrValue: attrSetOf(md[:])},
 		{AttrType: cmsAttrSigningCert, AttrValue: attrSetOf(sc)},
 	}
-	attrsDER, err := asn1.Marshal(attrs)
+	// Sign over the canonical encoding: the token's set-tagged
+	// SignedAttrs field is DER-sorted on marshal, and DER (X.690
+	// 11.6) orders SET OF components by ascending encoding — the
+	// bytes the strict verifiers re-derive. Sort the per-attribute
+	// encodings before signing (a plain-slice marshal keeps slice
+	// order).
+	perAttr := make([][]byte, 0, len(attrs))
+	for _, a := range attrs {
+		der, err := asn1.Marshal(a)
+		if err != nil {
+			return nil, fmt.Errorf("marshal signed attr: %w", err)
+		}
+		perAttr = append(perAttr, der)
+	}
+	sort.Slice(perAttr, func(i, j int) bool { return bytes.Compare(perAttr[i], perAttr[j]) < 0 })
+	rawAttrs := make([]asn1.RawValue, 0, len(perAttr))
+	for _, der := range perAttr {
+		rawAttrs = append(rawAttrs, asn1.RawValue{FullBytes: der})
+	}
+	attrsDER, err := asn1.Marshal(rawAttrs)
 	if err != nil {
 		return nil, fmt.Errorf("marshal signed attrs: %w", err)
 	}
